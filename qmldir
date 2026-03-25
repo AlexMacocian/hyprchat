@@ -1,0 +1,5 @@
+singleton Theme Theme.qml
+ChatWindow ChatWindow.qml
+ChatView ChatView.qml
+MessageBubble MessageBubble.qml
+InputBar InputBar.qml
