@@ -3,3 +3,6 @@ ChatWindow ChatWindow.qml
 ChatView ChatView.qml
 MessageBubble MessageBubble.qml
 InputBar InputBar.qml
+OpenAIBackend OpenAIBackend.qml
+KeyringService KeyringService.qml
+ApiKeyPrompt ApiKeyPrompt.qml

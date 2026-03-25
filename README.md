@@ -18,6 +18,8 @@ a resident Hyprland shell widget.
 components, tech stack, project structure
 - [Backends & Models](Documentation/backends.md) - LLM provider interface,
 tool support, API details
+- [Authentication](Documentation/authentication.md) - API key management,
+keyring integration, sign-out
 - [Frontend](Documentation/frontend.md) - QML UI, theming, Hyprland integration
 - [Backend Implementation](Documentation/backend-implementation.md) - ChatService,
 tool-use loop, configuration

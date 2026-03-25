@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 
 FloatingWindow {
     id: window
@@ -39,6 +40,75 @@ FloatingWindow {
         id: messageModel
     }
 
+    // Active backend
+    property string activeBackendName: "openai"
+    property string activeModel: "gpt-4o"
+
+    // Keyring for API key retrieval
+    KeyringService {
+        id: keyring
+        onKeyRetrieved: (account, key) => {
+            backend.apiKey = key;
+            apiKeyPrompt.shown = false;
+        }
+        onKeyMissing: (account) => {
+            apiKeyPrompt.backendName = account;
+            apiKeyPrompt.shown = true;
+            apiKeyPrompt.focusInput();
+        }
+        onKeyError: (account, error) => {
+            console.warn("Keyring error:", error);
+            apiKeyPrompt.backendName = account;
+            apiKeyPrompt.shown = true;
+            apiKeyPrompt.focusInput();
+        }
+        onKeyStored: (account) => {
+            // Key saved — now look it up to set it on the backend
+            keyring.lookup(account);
+        }
+        onKeyDeleted: (account) => {
+            backend.apiKey = "";
+            apiKeyPrompt.backendName = account;
+            apiKeyPrompt.shown = true;
+            apiKeyPrompt.focusInput();
+        }
+    }
+
+    // LLM backend
+    OpenAIBackend {
+        id: backend
+        model: window.activeModel
+
+        onTokenReceived: (token) => {
+            // Update the last assistant message in-place
+            let idx = messageModel.count - 1;
+            if (idx >= 0 && messageModel.get(idx).role === "assistant") {
+                let current = messageModel.get(idx).text;
+                if (current === "...") {
+                    messageModel.set(idx, { role: "assistant", text: token });
+                } else {
+                    messageModel.set(idx, { role: "assistant", text: current + token });
+                }
+            }
+        }
+
+        onResponseFinished: {
+            // Done streaming
+        }
+
+        onResponseError: (error) => {
+            let idx = messageModel.count - 1;
+            if (idx >= 0 && messageModel.get(idx).role === "assistant") {
+                messageModel.set(idx, { role: "assistant", text: "**Error:** " + error });
+            }
+        }
+    }
+
+    // Fetch API key on startup
+    Component.onCompleted: {
+        keyring.lookup(activeBackendName);
+    }
+
     Rectangle {
         anchors.fill: parent
         color: Theme.bg0
@@ -69,7 +139,7 @@ FloatingWindow {
                     Item { Layout.fillWidth: true }
 
                     Text {
-                        text: "copilot · gpt-4o"
+                        text: window.activeBackendName + " · " + window.activeModel
                         color: Theme.textDim
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize - 1
@@ -82,6 +152,20 @@ FloatingWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
                 color: Theme.border
+            }
+
+            // API key prompt (shown when key is missing)
+            ApiKeyPrompt {
+                id: apiKeyPrompt
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+
+                onKeySubmitted: (key) => {
+                    keyring.store(apiKeyPrompt.backendName, key);
+                }
+                onCancelled: {
+                    apiKeyPrompt.shown = false;
+                }
             }
 
             // Chat messages
@@ -106,9 +190,15 @@ FloatingWindow {
                 Layout.preferredHeight: implicitHeight
 
                 onMessageSent: (text) => {
+                    if (backend.apiKey.length === 0) {
+                        apiKeyPrompt.backendName = window.activeBackendName;
+                        apiKeyPrompt.shown = true;
+                        apiKeyPrompt.focusInput();
+                        return;
+                    }
                     messageModel.append({ role: "user", text: text });
-                    // TODO: send to backend, receive streaming response
-                    messageModel.append({ role: "assistant", text: "_Thinking..._" });
+                    messageModel.append({ role: "assistant", text: "..." });
+                    backend.send(messageModel);
                 }
             }
         }
