@@ -41,29 +41,102 @@ FloatingWindow {
     }
 
     // Active backend
-    property string activeBackendName: "openai"
-    property string activeModel: "gpt-4o"
+    property string activeBackendName: prefs.activeBackend
+    property string activeModel: prefs.activeModel
+
+    // Preferences (persisted to file)
+    Preferences {
+        id: prefs
+    }
+
+    // Model fetcher
+    ModelFetcher {
+        id: modelFetcher
+        backendName: window.activeBackendName
+        apiKey: backend.apiKey
+
+        onFetchComplete: {
+            backendSwitcher.models = modelFetcher.models;
+            backendSwitcher.loadingModels = false;
+        }
+
+        onCopilotApiReady: (apiBase, token) => {
+            // Use the Copilot internal API for chat completions
+            backend.apiUrl = apiBase + "/chat/completions";
+            backend.apiKey = token;
+        }
+    }
+
+    function switchBackend(name) {
+        activeBackendName = name;
+        prefs.activeBackend = name;
+        prefs.save();
+        // Re-auth for new backend
+        if (name === "copilot") {
+            initCopilotAuth();
+        } else if (name === "ollama") {
+            backend.apiKey = "ollama";
+        } else {
+            keyring.lookup(name);
+        }
+        // Fetch models for new backend
+        modelFetcher.backendName = name;
+        backendSwitcher.loadingModels = true;
+        modelFetcher.fetch();
+    }
+
+    function switchModel(backend, model) {
+        activeModel = model;
+        prefs.activeModel = model;
+        prefs.save();
+    }
+
+    // Backend URL mapping
+    readonly property var backendUrls: ({
+        "copilot": "https://models.inference.ai.azure.com/chat/completions",
+        "openai": "https://api.openai.com/v1/chat/completions",
+        "claude": "https://api.anthropic.com/v1/messages",
+        "ollama": "http://localhost:11434/api/chat"
+    })
+
+    // For Copilot: try keyring for stored OAuth token, otherwise start device flow
+    function initCopilotAuth() {
+        keyring.lookup("copilot_oauth");
+    }
 
     // Keyring for API key retrieval
     KeyringService {
         id: keyring
         onKeyRetrieved: (account, key) => {
-            backend.apiKey = key;
-            apiKeyPrompt.shown = false;
+            if (account === "copilot_oauth") {
+                // Got OAuth token — exchange for Copilot session token
+                window.exchangeCopilotToken(key);
+            } else {
+                backend.apiKey = key;
+                apiKeyPrompt.shown = false;
+            }
         }
         onKeyMissing: (account) => {
-            apiKeyPrompt.backendName = account;
-            apiKeyPrompt.shown = true;
-            apiKeyPrompt.focusInput();
+            if (account === "copilot_oauth") {
+                // No OAuth token — start device flow
+                window.startGhLogin();
+            } else {
+                apiKeyPrompt.backendName = account;
+                apiKeyPrompt.shown = true;
+                apiKeyPrompt.focusInput();
+            }
         }
         onKeyError: (account, error) => {
             console.warn("Keyring error:", error);
-            apiKeyPrompt.backendName = account;
-            apiKeyPrompt.shown = true;
-            apiKeyPrompt.focusInput();
+            if (account === "copilot_oauth") {
+                window.startGhLogin();
+            } else {
+                apiKeyPrompt.backendName = account;
+                apiKeyPrompt.shown = true;
+                apiKeyPrompt.focusInput();
+            }
         }
         onKeyStored: (account) => {
-            // Key saved — now look it up to set it on the backend
             keyring.lookup(account);
         }
         onKeyDeleted: (account) => {
@@ -74,10 +147,72 @@ FloatingWindow {
         }
     }
 
+    // Exchange Copilot OAuth token for session token + API endpoint
+    function exchangeCopilotToken(oauthToken) {
+        copilotExchangeProcess.command = [
+            "curl", "-s",
+            "https://api.github.com/copilot_internal/v2/token",
+            "-H", "Authorization: token " + oauthToken,
+            "-H", "Accept: application/json"
+        ];
+        copilotExchangeProcess.running = true;
+    }
+
+    Process {
+        id: copilotExchangeProcess
+        running: false
+
+        stdout: StdioCollector {
+            id: exchangeStdout
+            waitForEnd: true
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0) {
+                console.warn("Copilot token exchange failed");
+                window.startGhLogin();
+                return;
+            }
+
+            try {
+                let json = JSON.parse(exchangeStdout.text);
+                let apiBase = json.endpoints && json.endpoints.api;
+                let token = json.token;
+
+                if (apiBase && token) {
+                    backend.apiUrl = apiBase + "/chat/completions";
+                    backend.apiKey = token;
+                    backend.extraHeaders = [
+                        "-H", "Editor-Version: vscode/1.105.1",
+                        "-H", "Editor-Plugin-Version: copilot-chat/0.26.7",
+                        "-H", "Copilot-Integration-Id: vscode-chat",
+                        "-H", "User-Agent: GitHubCopilotChat/0.26.7"
+                    ];
+                    modelFetcher.copilotApiBase = apiBase;
+                    modelFetcher.copilotSessionToken = token;
+                    apiKeyPrompt.shown = false;
+                } else {
+                    console.warn("Copilot token response missing endpoints or token");
+                    window.startGhLogin();
+                }
+            } catch (e) {
+                console.warn("Copilot token parse error:", e);
+                window.startGhLogin();
+            }
+        }
+    }
+
+    // GitHub device login flow
+    function startGhLogin() {
+        window.visible = true;
+        ghLoginFlow.start();
+    }
+
     // LLM backend
     OpenAIBackend {
         id: backend
         model: window.activeModel
+        apiUrl: window.backendUrls[window.activeBackendName] || "https://api.openai.com/v1/chat/completions"
 
         onTokenReceived: (token) => {
             // Update the last assistant message in-place
@@ -106,7 +241,13 @@ FloatingWindow {
 
     // Fetch API key on startup
     Component.onCompleted: {
-        keyring.lookup(activeBackendName);
+        if (activeBackendName === "copilot") {
+            initCopilotAuth();
+        } else if (activeBackendName === "ollama") {
+            backend.apiKey = "ollama";
+        } else {
+            keyring.lookup(activeBackendName);
+        }
     }
 
     Rectangle {
@@ -138,11 +279,36 @@ FloatingWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    Text {
-                        text: window.activeBackendName + " · " + window.activeModel
-                        color: Theme.textDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize - 1
+                    // Clickable backend/model label
+                    Rectangle {
+                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: backendLabel.implicitWidth + 16
+                        radius: 4
+                        color: backendLabelMouse.containsMouse ? Theme.bg2 : "transparent"
+
+                        Text {
+                            id: backendLabel
+                            anchors.centerIn: parent
+                            text: window.activeBackendName + " · " + window.activeModel
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 1
+                        }
+
+                        MouseArea {
+                            id: backendLabelMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                backendSwitcher.shown = !backendSwitcher.shown;
+                                if (backendSwitcher.shown) {
+                                    backendSwitcher.currentBackend = window.activeBackendName;
+                                    backendSwitcher.currentModel = window.activeModel;
+                                    backendSwitcher.loadingModels = true;
+                                    modelFetcher.fetch();
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -152,6 +318,24 @@ FloatingWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
                 color: Theme.border
+            }
+
+            // Backend/model switcher popup
+            BackendSwitcher {
+                id: backendSwitcher
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                currentBackend: window.activeBackendName
+                currentModel: window.activeModel
+
+                onBackendSelected: (backend) => {
+                    window.switchBackend(backend);
+                    backendSwitcher.currentBackend = backend;
+                }
+                onModelSelected: (backend, model) => {
+                    window.switchModel(backend, model);
+                    backendSwitcher.currentModel = model;
+                }
             }
 
             // API key prompt (shown when key is missing)
@@ -165,6 +349,26 @@ FloatingWindow {
                 }
                 onCancelled: {
                     apiKeyPrompt.shown = false;
+                }
+            }
+
+            // GitHub login flow (shown for Copilot when not authenticated)
+            GhLoginFlow {
+                id: ghLoginFlow
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+
+                onAuthCompleted: (oauthToken) => {
+                    // Store OAuth token in keyring for future use
+                    keyring.store("copilot_oauth", oauthToken);
+                    // Exchange for session token
+                    window.exchangeCopilotToken(oauthToken);
+                }
+                onAuthFailed: (error) => {
+                    console.warn("GitHub login failed:", error);
+                    apiKeyPrompt.backendName = "copilot";
+                    apiKeyPrompt.shown = true;
+                    apiKeyPrompt.focusInput();
                 }
             }
 

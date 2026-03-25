@@ -12,6 +12,9 @@ Item {
     property string model: "gpt-4o"
     property string systemPrompt: "You are a helpful assistant. Be concise."
 
+    // Extra headers for Copilot internal API
+    property var extraHeaders: []
+
     // Signals
     signal tokenReceived(string token)
     signal responseFinished()
@@ -47,7 +50,7 @@ Item {
             "-H", "Content-Type: application/json",
             "-H", "Authorization: Bearer " + apiKey,
             "-d", body
-        ];
+        ].concat(extraHeaders);
         curlProcess.running = true;
     }
 

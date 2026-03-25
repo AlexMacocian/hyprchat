@@ -6,3 +6,7 @@ InputBar InputBar.qml
 OpenAIBackend OpenAIBackend.qml
 KeyringService KeyringService.qml
 ApiKeyPrompt ApiKeyPrompt.qml
+GhLoginFlow GhLoginFlow.qml
+Preferences Preferences.qml
+ModelFetcher ModelFetcher.qml
+BackendSwitcher BackendSwitcher.qml
