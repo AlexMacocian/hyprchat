@@ -31,6 +31,9 @@ growth control, token budgets
 transport, tool execution flow
 - [File System MCP](Documentation/mcp-filesystem.md) - read-only file access server
 - [Memory MCP](Documentation/mcp-memory.md) — persistent memory server and tools
+- [Shell MCP](Documentation/mcp-shell.md) — terminal command execution,
+visible terminal window
+- [Web MCP](Documentation/mcp-web.md) — internet search, reranking, and page scraping
 
 ## Quick Start
 
@@ -64,7 +67,3 @@ bind = $mainMod, G, global, hyprchat:toggle
 `~/.config/hyprchat/config.json` - see
 [Backend Implementation](Documentation/backend-implementation.md#configuration)
 for the full schema.
-
-## License
-
-TODO

@@ -48,6 +48,8 @@ graph TD
 | ------ | ------- | ------- |
 | [File System MCP](mcp-filesystem.md) | Read-only file access | Scoped to configured directories |
 | [Memory MCP](mcp-memory.md) | Persistent memory | Read/append markdown files by topic |
+| [Shell MCP](mcp-shell.md) | Terminal command execution | Spawns a visible terminal, tracks lifecycle |
+| [Web MCP](mcp-web.md) | Internet search and scraping | Search + rerank + extract page content |
 
 ## Configuration
 
