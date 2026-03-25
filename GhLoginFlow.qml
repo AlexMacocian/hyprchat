@@ -216,7 +216,7 @@ Item {
                     text: root.userCode
                     color: Theme.accent2
                     font.family: Theme.fontFamily
-                    font.pixelSize: 22
+                    font.pixelSize: Theme.fontSize + 10
                     font.bold: true
                     font.letterSpacing: 4
                 }

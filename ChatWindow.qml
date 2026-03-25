@@ -44,6 +44,19 @@ FloatingWindow {
     property string activeBackendName: prefs.activeBackend
     property string activeModel: prefs.activeModel
 
+    // Context window tracking
+    property int maxContextTokens: 128000
+    property int actualPromptTokens: -1  // -1 means no actual data yet
+    property int estimatedTokens: {
+        let chars = 0;
+        for (let i = 0; i < messageModel.count; i++) {
+            chars += messageModel.get(i).text.length;
+        }
+        return Math.ceil(chars / 3.5); // ~3.5 chars per token heuristic
+    }
+    property int displayTokens: actualPromptTokens >= 0 ? actualPromptTokens : estimatedTokens
+    property real contextUsage: maxContextTokens > 0 ? Math.min(displayTokens / maxContextTokens, 1.0) : 0
+
     // Preferences (persisted to file)
     Preferences {
         id: prefs
@@ -89,6 +102,16 @@ FloatingWindow {
         activeModel = model;
         prefs.activeModel = model;
         prefs.save();
+        actualPromptTokens = -1; // reset to heuristic
+
+        // Find maxTokens from the fetched model list
+        let models = modelFetcher.models;
+        for (let i = 0; i < models.length; i++) {
+            if (models[i].id === model && models[i].maxTokens) {
+                maxContextTokens = models[i].maxTokens;
+                break;
+            }
+        }
     }
 
     // Backend URL mapping
@@ -220,15 +243,21 @@ FloatingWindow {
             if (idx >= 0 && messageModel.get(idx).role === "assistant") {
                 let current = messageModel.get(idx).text;
                 if (current === "...") {
-                    messageModel.set(idx, { role: "assistant", text: token });
+                    messageModel.setProperty(idx, "text", token);
                 } else {
-                    messageModel.set(idx, { role: "assistant", text: current + token });
+                    messageModel.setProperty(idx, "text", current + token);
                 }
             }
         }
 
         onResponseFinished: {
             // Done streaming
+        }
+
+        onUsageReceived: (promptTokens, completionTokens, totalTokens) => {
+            if (totalTokens > 0) {
+                window.actualPromptTokens = totalTokens;
+            }
         }
 
         onResponseError: (error) => {
@@ -256,6 +285,7 @@ FloatingWindow {
 
         ColumnLayout {
             anchors.fill: parent
+            anchors.bottomMargin: 4
             spacing: 0
 
             // Top bar
@@ -275,6 +305,66 @@ FloatingWindow {
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
                         font.bold: true
+                    }
+
+                    // New chat button
+                    Rectangle {
+                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: newChatLabel.implicitWidth + 12
+                        radius: 4
+                        color: newChatMouse.containsMouse ? Theme.bg3 : "transparent"
+
+                        Text {
+                            id: newChatLabel
+                            anchors.centerIn: parent
+                            text: "New Chat"
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 2
+                        }
+
+                        MouseArea {
+                            id: newChatMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: { messageModel.clear(); window.actualPromptTokens = -1; }
+                        }
+                    }
+
+                    // Sign out button
+                    Rectangle {
+                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: signOutLabel.implicitWidth + 12
+                        radius: 4
+                        color: signOutMouse.containsMouse ? Theme.bg3 : "transparent"
+
+                        Text {
+                            id: signOutLabel
+                            anchors.centerIn: parent
+                            text: "Sign Out"
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 2
+                        }
+
+                        MouseArea {
+                            id: signOutMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                if (window.activeBackendName === "copilot") {
+                                    keyring.remove("copilot_oauth");
+                                    backend.apiKey = "";
+                                    backend.extraHeaders = [];
+                                    modelFetcher.copilotApiBase = "";
+                                    modelFetcher.copilotSessionToken = "";
+                                    window.startGhLogin();
+                                } else if (window.activeBackendName !== "ollama") {
+                                    keyring.remove(window.activeBackendName);
+                                    backend.apiKey = "";
+                                }
+                            }
+                        }
                     }
 
                     Item { Layout.fillWidth: true }
@@ -387,11 +477,59 @@ FloatingWindow {
                 color: Theme.border
             }
 
+            // Context gauge
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 14
+                Layout.leftMargin: 8
+                Layout.rightMargin: 8
+
+                // Background track
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 3
+                    radius: 1.5
+                    color: Theme.bg2
+
+                    // Fill bar
+                    Rectangle {
+                        width: parent.width * window.contextUsage
+                        height: parent.height
+                        radius: parent.radius
+                        color: Theme.accent1
+
+                        Behavior on width {
+                            NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+                        }
+                    }
+                }
+
+                // Label
+                Text {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: {
+                        let tokens = window.displayTokens;
+                        let max = window.maxContextTokens;
+                        let prefix = window.actualPromptTokens >= 0 ? "" : "~";
+                        if (tokens < 1000) return prefix + tokens + " / " + Math.round(max / 1000) + "k";
+                        return prefix + (tokens / 1000).toFixed(1) + "k / " + Math.round(max / 1000) + "k";
+                    }
+                    color: Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize - 3
+                }
+            }
+
             // Input bar
             InputBar {
                 id: inputBar
                 Layout.fillWidth: true
+                Layout.minimumHeight: 48
                 Layout.preferredHeight: implicitHeight
+                Layout.bottomMargin: 4
 
                 onMessageSent: (text) => {
                     if (backend.apiKey.length === 0) {
@@ -417,6 +555,6 @@ FloatingWindow {
     // Ctrl+N for new chat
     Shortcut {
         sequence: "Ctrl+N"
-        onActivated: messageModel.clear()
+        onActivated: { messageModel.clear(); window.actualPromptTokens = -1; }
     }
 }

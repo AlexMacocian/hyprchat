@@ -158,15 +158,29 @@ Item {
     function parseCopilotModels(text) {
         let json = JSON.parse(text);
         if (json.data && Array.isArray(json.data)) {
-            // Same format as VS Code / avante.nvim uses
             let chatModels = json.data
                 .filter(m => m.capabilities && m.capabilities.type === "chat")
                 .filter(m => !m.id.endsWith("-paygo"))
                 .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-            models = chatModels.map(m => ({
-                id: m.id,
-                name: m.name || m.id
-            }));
+
+            // Detect duplicate names and disambiguate with id
+            let nameCounts = {};
+            for (let i = 0; i < chatModels.length; i++) {
+                let n = chatModels[i].name || chatModels[i].id;
+                nameCounts[n] = (nameCounts[n] || 0) + 1;
+            }
+
+            models = chatModels.map(m => {
+                let displayName = m.name || m.id;
+                if (nameCounts[displayName] > 1) {
+                    displayName = displayName + " (" + m.id + ")";
+                }
+                let maxTokens = 128000; // default
+                if (m.capabilities && m.capabilities.limits && m.capabilities.limits.max_prompt_tokens) {
+                    maxTokens = m.capabilities.limits.max_prompt_tokens;
+                }
+                return { id: m.id, name: displayName, maxTokens: maxTokens };
+            });
         }
     }
 
