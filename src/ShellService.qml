@@ -3,54 +3,141 @@ import Quickshell
 import Quickshell.Io
 
 // Shell service using kitty remote control.
-// Spawns a kitty terminal with --listen-on, sends commands via `kitty @`,
-// reads output via `kitty @ get-text`. No FIFO, no script, no markers.
+// Spawns kitty with a shell that has a POSTCMD hook installed.
+// The hook touches a signal file after every command completes.
+// inotifywait detects this instantly — zero polling, zero visible markers.
 Item {
     id: root
 
-    property int timeout: 30
     property string shell: Quickshell.env("SHELL") || "/bin/bash"
     property string workingDirectory: Quickshell.env("HOME")
     property bool terminalAlive: terminalProcess.running
 
     signal execComplete(string toolCallId, string result)
 
-    // Kitty socket for remote control
-    readonly property string _socketPath: "/tmp/hyprchat-kitty-" + Qt.application.pid + ".sock"
+    readonly property string _socketPath: "/tmp/hyprchat-kitty.sock"
+    readonly property string _signalFile: "/tmp/hyprchat-done"
 
     // State
     property var _queue: []
     property string _currentCallId: ""
     property bool _locked: false
     property string _bufferBefore: ""
-    property int _pollCount: 0
-    property string _lastBuffer: ""
-    property int _stableCount: 0
     property int _spawnFailCount: 0
     readonly property int _maxSpawnRetries: 3
-    readonly property int _stableThreshold: 3  // 1.5s of no change
-    readonly property int _maxPolls: 120       // 60s
 
-    // --- Spawn terminal ---
+    // --- Setup ---
+    Component.onCompleted: {
+        setupProcess.command = [
+            "bash", "-c",
+            "rm -f '" + _signalFile + "' && touch '" + _signalFile + "'"
+        ];
+        setupProcess.running = true;
+    }
+
+    Process {
+        id: setupProcess
+        running: false
+        onExited: {
+            _startWatcher();
+        }
+    }
+
+    // --- inotifywait watcher (runs forever) ---
+    function _startWatcher() {
+        watchProcess.command = [
+            "bash", "-c",
+            "while inotifywait -q -e close_write '" + _signalFile + "' 2>/dev/null; do echo DONE; done"
+        ];
+        watchProcess.running = true;
+    }
+
+    Process {
+        id: watchProcess
+        running: false
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: (line) => {
+                if (line.indexOf("DONE") >= 0 && root._locked) {
+                    console.log("ShellService: command completed (postcmd hook fired)");
+                    captureDelay.running = true;
+                }
+            }
+        }
+
+        onExited: {
+            if (root.terminalAlive) {
+                root._startWatcher();
+            }
+        }
+    }
+
+    Timer {
+        id: captureDelay
+        interval: 300
+        running: false
+        repeat: false
+        onTriggered: root._captureResult()
+    }
+
+    // --- Spawn terminal with postcmd hook ---
     function _spawnTerminal() {
         if (terminalProcess.running) return;
         if (_spawnFailCount >= _maxSpawnRetries) {
-            console.warn("ShellService: too many spawn failures");
             _failAllQueued("Failed to spawn terminal.");
             return;
         }
 
-        console.log("ShellService: spawning kitty with remote control");
-        terminalProcess.command = [
-            "setsid", "kitty",
-            "--class", "hyprchat-shell",
-            "--title", "HyprChat Shell",
-            "--listen-on", "unix:" + _socketPath,
-            "--override", "allow_remote_control=yes",
-            "--directory", workingDirectory,
-            "-e", shell
+        console.log("ShellService: spawning kitty");
+
+        // Build shell init command that installs a postcmd hook
+        // The hook touches the signal file after every command — invisible to user
+        let initCmd = "";
+        if (shell.indexOf("fish") >= 0) {
+            // Fish: use --on-event fish_postexec
+            initCmd = "function __hyprchat_postcmd --on-event fish_postexec; echo done > '" + _signalFile + "'; end";
+        } else if (shell.indexOf("zsh") >= 0) {
+            // Zsh: use precmd hook
+            initCmd = "precmd() { echo done > '" + _signalFile + "'; }";
+        } else {
+            // Bash: use PROMPT_COMMAND
+            initCmd = "PROMPT_COMMAND='echo done > \"" + _signalFile + "\";'\"${PROMPT_COMMAND}\"";
+        }
+
+        // Write a tiny init script
+        initProcess.command = [
+            "bash", "-c",
+            "printf '%s\\n' '" + initCmd.replace(/'/g, "'\\''") + "' > '" + _signalFile + ".init'"
         ];
-        terminalProcess.running = true;
+        initProcess.running = true;
+    }
+
+    Process {
+        id: initProcess
+        running: false
+        onExited: {
+            // Spawn kitty with the shell, sourcing our init script
+            let shellCmd = "";
+            if (root.shell.indexOf("fish") >= 0) {
+                shellCmd = root.shell + " -C 'source " + root._signalFile + ".init'";
+            } else if (root.shell.indexOf("zsh") >= 0) {
+                shellCmd = root.shell + " -c 'source " + root._signalFile + ".init; exec " + root.shell + "'";
+            } else {
+                shellCmd = root.shell + " --rcfile <(cat ~/.bashrc " + root._signalFile + ".init 2>/dev/null)";
+            }
+
+            terminalProcess.command = [
+                "setsid", "kitty",
+                "--class", "hyprchat-shell",
+                "--title", "HyprChat Shell",
+                "--listen-on", "unix:" + root._socketPath,
+                "--override", "allow_remote_control=yes",
+                "--directory", root.workingDirectory,
+                "-e", "bash", "-c", shellCmd
+            ];
+            terminalProcess.running = true;
+        }
     }
 
     Process {
@@ -62,7 +149,6 @@ Item {
             root._spawnFailCount++;
 
             if (root._locked) {
-                pollTimer.running = false;
                 root._locked = false;
                 root.execComplete(root._currentCallId, "Terminal was closed before command completed.");
             }
@@ -97,161 +183,117 @@ Item {
         _currentCallId = item.toolCallId;
 
         if (item.background) {
-            _sendCommand(item.command);
+            _sendKeys(item.command + "\n");
             root.execComplete(item.toolCallId, "Command sent to terminal in background.");
             _processQueue();
             return;
         }
 
-        // Lock and capture
         _locked = true;
 
-        // Step 1: Get current buffer (before command)
-        _getBuffer("before", item.command);
+        // Snapshot buffer before command
+        _snapshotBefore(item.command);
     }
 
     Timer {
         id: spawnRetryTimer
-        interval: 1500
+        interval: 2000
         running: false
         repeat: false
         onTriggered: root._processQueue()
     }
 
-    // --- Send command via kitty remote control ---
-    function _sendCommand(command) {
+    // --- Snapshot buffer before ---
+    property string _pendingCommand: ""
+
+    function _snapshotBefore(command) {
+        _pendingCommand = command;
+        beforeProcess.command = [
+            "kitty", "@", "--to", "unix:" + _socketPath,
+            "get-text", "--extent", "all"
+        ];
+        beforeProcess.running = true;
+    }
+
+    Process {
+        id: beforeProcess
+        running: false
+        stdout: StdioCollector { id: beforeStdout; waitForEnd: true }
+
+        onExited: {
+            root._bufferBefore = beforeStdout.text;
+            // Send the raw command — no markers, no suffix
+            root._sendKeys(root._pendingCommand + "\n");
+        }
+    }
+
+    // --- Send keystrokes ---
+    function _sendKeys(text) {
         sendProcess.command = [
             "kitty", "@", "--to", "unix:" + _socketPath,
-            "send-text", "--", command + "\n"
+            "send-text", "--", text
         ];
         sendProcess.running = true;
     }
 
     Process { id: sendProcess; running: false }
 
-    // --- Get terminal buffer ---
-    property string _getBufferPhase: ""
-    property string _pendingCommand: ""
-
-    function _getBuffer(phase, command) {
-        _getBufferPhase = phase;
-        _pendingCommand = command || "";
-        getTextProcess.command = [
+    // --- Capture result (triggered by postcmd hook) ---
+    function _captureResult() {
+        captureProcess.command = [
             "kitty", "@", "--to", "unix:" + _socketPath,
-            "get-text", "--extent", "all", "--ansi"
+            "get-text", "--extent", "all"
         ];
-        getTextProcess.running = true;
+        captureProcess.running = true;
     }
 
     Process {
-        id: getTextProcess
+        id: captureProcess
         running: false
-        stdout: StdioCollector { id: getTextStdout; waitForEnd: true }
+        stdout: StdioCollector { id: captureStdout; waitForEnd: true }
 
-        onExited: (exitCode, exitStatus) => {
-            let buffer = getTextStdout.text;
+        onExited: {
+            let currentBuffer = captureStdout.text;
+            let result = currentBuffer;
 
-            if (root._getBufferPhase === "before") {
-                // Store buffer before command
-                root._bufferBefore = buffer;
-                root._lastBuffer = buffer;
-                root._stableCount = 0;
-                root._pollCount = 0;
-
-                // Send the command
-                root._sendCommand(root._pendingCommand);
-
-                // Start polling after a short delay
-                pollStartTimer.running = true;
-
-            } else if (root._getBufferPhase === "poll") {
-                if (buffer === root._lastBuffer) {
-                    root._stableCount++;
-                } else {
-                    root._stableCount = 0;
-                    root._lastBuffer = buffer;
+            // Diff against before-buffer
+            if (root._bufferBefore.length > 0 && result.indexOf(root._bufferBefore) === 0) {
+                result = result.substring(root._bufferBefore.length);
+            } else {
+                let beforeLines = root._bufferBefore.split("\n");
+                let currentLines = result.split("\n");
+                let startLine = 0;
+                for (let i = 0; i < Math.min(beforeLines.length, currentLines.length); i++) {
+                    if (beforeLines[i] === currentLines[i]) {
+                        startLine = i + 1;
+                    } else {
+                        break;
+                    }
                 }
-
-                if (root._stableCount >= root._stableThreshold || root._pollCount >= root._maxPolls) {
-                    pollTimer.running = false;
-                    root._extractResult(buffer);
-                }
-
-            } else if (root._getBufferPhase === "capture") {
-                root._extractResult(buffer);
+                result = currentLines.slice(startLine).join("\n");
             }
-        }
-    }
 
-    Timer {
-        id: pollStartTimer
-        interval: 800  // wait for command to start producing output
-        running: false
-        repeat: false
-        onTriggered: { pollTimer.running = true; }
-    }
+            // Strip ANSI/OSC codes
+            result = result.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
+                           .replace(/\x1B\][^\x07]*\x07/g, "")
+                           .replace(/\x1B\([A-Z]/g, "")
+                           .replace(/\r/g, "")
+                           .replace(/^\s+|\s+$/g, "");
 
-    Timer {
-        id: pollTimer
-        interval: 500
-        running: false
-        repeat: true
-        onTriggered: {
-            root._pollCount++;
-            root._getBuffer("poll");
-        }
-    }
-
-    // --- Extract result ---
-    function _extractResult(currentBuffer) {
-        // The new output is everything in currentBuffer that wasn't in bufferBefore
-        let result = currentBuffer;
-
-        // Remove the prefix that matches bufferBefore
-        if (_bufferBefore.length > 0 && result.indexOf(_bufferBefore) === 0) {
-            result = result.substring(_bufferBefore.length);
-        } else {
-            // Buffer scrolled — try to find new content by removing common suffix
-            // Just use the whole buffer minus bufferBefore length as approximation
-            let beforeLines = _bufferBefore.split("\n");
-            let currentLines = result.split("\n");
-
-            // Find where the new content starts
-            let startLine = 0;
-            for (let i = 0; i < Math.min(beforeLines.length, currentLines.length); i++) {
-                if (beforeLines[i] === currentLines[i]) {
-                    startLine = i + 1;
-                } else {
-                    break;
-                }
+            // Truncate
+            if (result.length > 10000) {
+                result = result.substring(0, 5000) +
+                    "\n\n[... truncated ...]\n\n" +
+                    result.substring(result.length - 5000);
             }
-            result = currentLines.slice(startLine).join("\n");
+
+            if (result.length === 0) result = "(no output)";
+
+            console.log("ShellService: captured", result.length, "chars");
+            root._locked = false;
+            root.execComplete(root._currentCallId, result);
+            root._processQueue();
         }
-
-        // Strip ANSI codes
-        result = result.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
-                       .replace(/\x1B\][^\x07]*\x07/g, "")
-                       .replace(/\x1B\([A-Z]/g, "")
-                       .replace(/\r/g, "")
-                       .replace(/^\s+|\s+$/g, "");
-
-        // Truncate
-        if (result.length > 10000) {
-            result = result.substring(0, 5000) +
-                "\n\n[... truncated ...]\n\n" +
-                result.substring(result.length - 5000);
-        }
-
-        if (result.length === 0) result = "(no output)";
-
-        if (_pollCount >= _maxPolls) {
-            result = "Command may still be running (output capture timed out).\n\nOutput so far:\n" + result;
-        }
-
-        console.log("ShellService: captured", result.length, "chars after", _pollCount, "polls");
-        _locked = false;
-        root.execComplete(_currentCallId, result);
-        _processQueue();
     }
 
     // --- Helpers ---
@@ -262,10 +304,10 @@ Item {
         }
     }
 
-    // --- Cleanup ---
     Component.onDestruction: {
+        watchProcess.running = false;
         terminalProcess.running = false;
-        cleanupProcess.command = ["rm", "-f", _socketPath];
+        cleanupProcess.command = ["bash", "-c", "rm -f '" + _socketPath + "' '" + _signalFile + "' '" + _signalFile + ".init'"];
         cleanupProcess.running = true;
     }
 
