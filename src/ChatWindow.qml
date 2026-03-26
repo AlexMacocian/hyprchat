@@ -75,6 +75,10 @@ FloatingWindow {
     property int _pendingToolDone: 0
 
     function _resolveAsyncTool(toolCallId, result) {
+        // Show result preview in UI
+        let preview = result.length > 200 ? result.substring(0, 200) + "..." : result;
+        messageModel.append({ role: "system", text: "↩ " + preview, sent: false });
+
         _pendingToolResults.push({
             role: "tool",
             tool_call_id: toolCallId,
@@ -83,7 +87,8 @@ FloatingWindow {
         _pendingToolDone++;
 
         if (_pendingToolDone >= _pendingToolTotal) {
-            // All tool results ready — continue conversation
+            // All tool results ready — add placeholder and continue
+            messageModel.append({ role: "assistant", text: "...", sent: true });
             backend.continueWithToolResults(_pendingToolCallMsg, _pendingToolResults);
             _pendingToolCallMsg = null;
             _pendingToolResults = [];
@@ -584,6 +589,22 @@ FloatingWindow {
             // Filter out empty tool calls (streaming artifacts)
             let validCalls = toolCalls.filter(tc => tc.name && tc.name.length > 0);
 
+            // Show tool calls in UI
+            for (let i = 0; i < validCalls.length; i++) {
+                let tc = validCalls[i];
+                let argsPreview = "";
+                try {
+                    let args = JSON.parse(tc.arguments || "{}");
+                    // Show a concise preview of the args
+                    if (args.command) argsPreview = "`" + args.command + "`";
+                    else if (args.query) argsPreview = "\"" + args.query + "\"";
+                    else if (args.topic) argsPreview = args.topic;
+                    else if (args.url) argsPreview = args.url;
+                } catch(e) {}
+                let label = "🔧 **" + tc.name + "**" + (argsPreview.length > 0 ? "  " + argsPreview : "");
+                messageModel.append({ role: "system", text: label, sent: false });
+            }
+
             let toolCallMsg = {
                 role: "assistant",
                 content: null,
@@ -638,6 +659,10 @@ FloatingWindow {
                     let result = window.executeTool(tc.name, tc.arguments);
                     console.log("ChatWindow: tool", tc.name, "->", result.substring(0, 100));
                     toolResults.push({ role: "tool", tool_call_id: tc.id, content: result });
+
+                    // Show result preview in UI
+                    let preview = result.length > 200 ? result.substring(0, 200) + "..." : result;
+                    messageModel.append({ role: "system", text: "↩ " + preview, sent: false });
                 }
             }
 
@@ -648,7 +673,8 @@ FloatingWindow {
                 window._pendingToolTotal = toolResults.length + asyncCount;
                 window._pendingToolDone = toolResults.length;
             } else {
-                // All sync — continue immediately
+                // All sync — add new placeholder and continue
+                messageModel.append({ role: "assistant", text: "...", sent: true });
                 backend.continueWithToolResults(toolCallMsg, toolResults);
             }
         }

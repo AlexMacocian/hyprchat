@@ -15,23 +15,70 @@ Item {
 
     signal execComplete(string toolCallId, string result)
 
-    // --- Execute command and capture output ---
+    // --- Command queue ---
+    property var _queue: []  // [{command, toolCallId, background}]
     property string _execCallId: ""
     property string _execCommand: ""
 
     function exec(command, toolCallId) {
-        if (execProcess.running) {
-            root.execComplete(toolCallId, "Error: another command is still running.");
+        _queue.push({ command: command, toolCallId: toolCallId, background: false });
+        _processQueue();
+    }
+
+    function execBackground(command, toolCallId) {
+        _queue.push({ command: command, toolCallId: toolCallId, background: true });
+        _processQueue();
+    }
+
+    // Commands that require elevation or interaction — blocked
+    readonly property var _blockedPrefixes: [
+        "sudo ", "sudo\t", "doas ", "pkexec ",
+        "paru ", "yay ", "pacman -S", "pacman -R", "pacman -U",
+        "apt install", "apt remove", "apt upgrade",
+        "dnf install", "dnf remove", "dnf upgrade",
+        "systemctl enable", "systemctl disable", "systemctl start", "systemctl stop",
+        "rm -rf /", "mkfs", "dd if="
+    ]
+
+    function _isBlocked(command) {
+        let cmd = command.replace(/^\s+/, "");
+        for (let i = 0; i < _blockedPrefixes.length; i++) {
+            if (cmd.indexOf(_blockedPrefixes[i]) === 0) return true;
+        }
+        // Also block if sudo/doas appears anywhere via pipe
+        if (cmd.indexOf("| sudo") >= 0 || cmd.indexOf("| doas") >= 0) return true;
+        return false;
+    }
+
+    function _processQueue() {
+        if (execProcess.running || _queue.length === 0) return;
+
+        let item = _queue.shift();
+        _execCallId = item.toolCallId;
+        _execCommand = item.command;
+
+        // Check for blocked commands
+        if (_isBlocked(item.command)) {
+            root.execComplete(item.toolCallId,
+                "BLOCKED: This command requires elevated privileges or is potentially destructive. " +
+                "Tell the user to run it manually:\n\n```\n" + item.command + "\n```");
+            root._processQueue();
             return;
         }
-        _execCallId = toolCallId;
-        _execCommand = command;
 
-        execProcess.command = [
-            "bash", "-c",
-            "cd '" + workingDirectory + "' && timeout " + timeout + " " + shell + " -c " +
-            "'" + command.replace(/'/g, "'\\''") + "' 2>&1"
-        ];
+        if (item.background) {
+            execProcess.command = [
+                "bash", "-c",
+                "cd '" + workingDirectory + "' && " + shell + " -c " +
+                "'" + item.command.replace(/'/g, "'\\''") + "' &"
+            ];
+        } else {
+            execProcess.command = [
+                "bash", "-c",
+                "cd '" + workingDirectory + "' && timeout " + timeout + " " + shell + " -c " +
+                "'" + item.command.replace(/'/g, "'\\''") + "' 2>&1"
+            ];
+        }
         execProcess.running = true;
     }
 
@@ -61,29 +108,9 @@ Item {
 
             console.log("ShellService: command '" + root._execCommand.substring(0, 60) + "' exit:", exitCode, "output:", result.length, "chars");
             root.execComplete(root._execCallId, result);
-        }
-    }
 
-    // --- Execute background command (no output capture) ---
-    property string _bgCallId: ""
-
-    function execBackground(command, toolCallId) {
-        _bgCallId = toolCallId;
-
-        bgProcess.command = [
-            "bash", "-c",
-            "cd '" + workingDirectory + "' && " + shell + " -c " +
-            "'" + command.replace(/'/g, "'\\''") + "' &"
-        ];
-        bgProcess.running = true;
-    }
-
-    Process {
-        id: bgProcess
-        running: false
-
-        onExited: (exitCode, exitStatus) => {
-            root.execComplete(root._bgCallId, "Command started in background.");
+            // Process next queued command
+            root._processQueue();
         }
     }
 }
