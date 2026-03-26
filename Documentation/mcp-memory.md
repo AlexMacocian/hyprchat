@@ -6,7 +6,7 @@ Persistent memory server for the LLM via MCP.
 
 Gives the LLM the ability to remember information across conversations.
 The model can recall past context, save new insights, and build up a
-knowledge base over time — all stored as human-readable markdown.
+knowledge base over time. Memory files are encrypted at rest.
 
 See also: [Memory overview](memory.md), [Memory Management](memory-management.md)
 
@@ -14,15 +14,44 @@ See also: [Memory overview](memory.md), [Memory Management](memory-management.md
 
 ```text
 ~/.config/hyprchat/memory/
-├── general.md
-├── linux.md
-├── cpp.md
-├── projects.md
+├── general.md.enc
+├── linux.md.enc
+├── cpp.md.enc
+├── projects.md.enc
 └── ...
 ```
 
-Files are plain markdown, one per topic. Created on demand when the
-model writes to a topic that doesn't exist yet.
+Files are markdown encrypted with AES-256-GCM. One file per topic,
+created on demand when the model writes to a topic that doesn't exist.
+
+### Encryption
+
+- Memory files are encrypted at rest using AES-256-CBC with PBKDF2
+- The encryption key is stored in the system keyring
+  (`service: hyprchat`, `account: memory_key`)
+- On first use, a random 256-bit key is generated and stored in the
+  keyring automatically
+- Files are decrypted into an in-memory cache at startup
+- Changes update the cache immediately, then write back encrypted
+
+#### File Format
+
+Each `.md.enc` file starts with a plaintext header line identifying
+the encryption algorithm, followed by the encrypted data:
+
+```
+HYPRCHAT:v1:aes-256-cbc\n<encrypted bytes>
+```
+
+| Field | Value | Purpose |
+|-------|-------|---------|
+| Magic | `HYPRCHAT` | Identifies the file as HyprChat memory |
+| Version | `v1` | Format version for future migration |
+| Algorithm | `aes-256-cbc` | Encryption algorithm identifier |
+
+On decrypt, the header is read first. If the header matches a known
+format, the corresponding algorithm is used. Files without a header
+(legacy) fall back to AES-256-CBC.
 
 ## Tools Exposed
 
@@ -32,15 +61,40 @@ model writes to a topic that doesn't exist yet.
 | `memory_read` | Read a memory file by topic | `topic` (string) |
 | `memory_append` | Append content to a memory file | `topic` (string), `content` (string) |
 | `memory_search` | Search across all memory files | `query` (string) |
+| `memory_delete_topic` | Delete an entire memory topic | `topic` (string) |
+| `memory_edit` | Replace the full content of a memory file | `topic` (string), `content` (string) |
 
 ### Behavior
 
-- `memory_list_topics` — returns topic names (filenames without `.md`)
-- `memory_read` — returns the full contents of `{topic}.md`
-- `memory_append` — appends `content` as a new section to `{topic}.md`,
-  separated by a blank line. Creates the file if it doesn't exist.
-- `memory_search` — simple substring/keyword search across all files.
-  Returns matching excerpts with topic names.
+- `memory_list_topics` — returns topic names (filenames without `.md.enc`)
+- `memory_read` — decrypts and returns the full contents of `{topic}.md.enc`
+- `memory_append` — decrypts, appends `content` as a new section,
+  re-encrypts and writes back. Creates the file if it doesn't exist.
+- `memory_search` — decrypts all files, performs substring/keyword search,
+  returns matching excerpts with topic names.
+- `memory_delete_topic` — deletes `{topic}.md.enc` from disk
+- `memory_edit` — replaces the full content of a topic (used by the
+  memory viewer for manual edits)
+
+## Memory Viewer
+
+HyprChat includes a built-in memory viewer accessible from the UI.
+It provides:
+
+- **Topic list** — scrollable list of all memory topics with file sizes
+- **Content view** — read the decrypted content of any topic
+- **Edit** — modify the content of a memory file in a text editor
+- **Delete** — remove a memory topic entirely (with confirmation)
+- **Search** — search across all memory files
+
+The viewer communicates with the Memory MCP server using the same
+tools the LLM uses. No separate file access is needed.
+
+### UI Integration
+
+The memory viewer is a panel/view within HyprChat, toggled via a
+button in the top bar or a keyboard shortcut. It does not replace
+the chat view — it can be shown alongside or as an overlay.
 
 ## Configuration
 
@@ -55,21 +109,43 @@ model writes to a topic that doesn't exist yet.
 ```
 
 The directory is created automatically if it doesn't exist.
+The encryption key is generated and stored in the keyring on first use.
 
 ## Implementation
 
-Spawned by `McpClient` as a `QProcess`. Communicates over stdin/stdout
+The Memory MCP server is implemented as a script or small binary
+spawned by QuickShell via `Process`. It communicates over stdin/stdout
 JSON-RPC following the MCP stdio transport spec.
 
-The server is a small standalone binary (or script) that:
+For the initial implementation, a Python or bash script is the
+simplest approach. Encryption uses `openssl` CLI for AES-256-GCM:
 
-1. Receives `initialize` → responds with capabilities
-2. Receives `tools/list` → responds with the tool definitions above
-3. Receives `tools/call` → performs the file operation and returns result
+```bash
+# Encrypt
+openssl enc -aes-256-gcm -in plain.md -out topic.md.enc -K $KEY_HEX -iv $NONCE_HEX
+
+# Decrypt
+openssl enc -d -aes-256-gcm -in topic.md.enc -out - -K $KEY_HEX -iv $NONCE_HEX
+```
+
+Alternatively, a Python script using `cryptography` library for
+cleaner AES-GCM handling.
+
+The server:
+
+1. Retrieves the encryption key from keyring via `secret-tool`
+2. If no key exists, generates one and stores it
+3. Receives `initialize` → responds with capabilities
+4. Receives `tools/list` → responds with the tool definitions above
+5. Receives `tools/call` → decrypts, operates, re-encrypts as needed
 
 ## Security
 
+- **Encrypted at rest** — AES-256-GCM, key in system keyring
 - **Scoped** — only accesses files within the configured memory path
-- **Append-only writes** — no overwrite, no delete via tools
-- **Path validation** — topic names are sanitized (alphanumeric + hyphens,
-  no path separators) to prevent traversal
+- **Path validation** — topic names are sanitized (alphanumeric +
+  hyphens, no path separators) to prevent traversal
+- **Key isolation** — the encryption key never leaves the keyring
+  and the MCP server process. It's not exposed to the LLM.
+- **Delete support** — users can permanently remove memory topics
+  through the viewer

@@ -40,6 +40,11 @@ FloatingWindow {
         id: messageModel
     }
 
+    // Memory service
+    MemoryService {
+        id: memoryService
+    }
+
     // Active backend
     property string activeBackendName: prefs.activeBackend
     property string activeModel: prefs.activeModel
@@ -58,7 +63,7 @@ FloatingWindow {
     property real contextUsage: maxContextTokens > 0 ? Math.min(displayTokens / maxContextTokens, 1.0) : 0
     property bool _summarizing: false
     readonly property real summarizeThreshold: prefs.summarizeThreshold
-    readonly property int keepRecentMessages: 4
+    readonly property int keepRecentMessages: prefs.keepRecentMessages
     property string _activeSummary: ""
 
     // Preferences (persisted to file)
@@ -351,6 +356,8 @@ FloatingWindow {
         model: window.activeModel
         apiUrl: window.backendUrls[window.activeBackendName] || "https://api.openai.com/v1/chat/completions"
         contextSummary: window._activeSummary
+        systemPrompt: prefs.systemPrompt
+        memoryEnabled: prefs.memoryEnabled
 
         onTokenReceived: (token) => {
             // Update the last assistant message in-place
@@ -446,6 +453,60 @@ FloatingWindow {
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: { messageModel.clear(); window.actualPromptTokens = -1; window._activeSummary = ""; }
+                        }
+                    }
+
+                    // Sign out button
+                    Rectangle {
+                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: memoryLabel.implicitWidth + 12
+                        radius: 4
+                        color: memoryMouse.containsMouse ? Theme.bg3 : "transparent"
+
+                        Text {
+                            id: memoryLabel
+                            anchors.centerIn: parent
+                            text: "Memory"
+                            color: memoryView.shown ? Theme.accent1 : Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 2
+                        }
+
+                        MouseArea {
+                            id: memoryMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                memoryView.shown = !memoryView.shown;
+                                prefsView.shown = false;
+                            }
+                        }
+                    }
+
+                    // Preferences button
+                    Rectangle {
+                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: prefsLabel.implicitWidth + 12
+                        radius: 4
+                        color: prefsMouse.containsMouse ? Theme.bg3 : "transparent"
+
+                        Text {
+                            id: prefsLabel
+                            anchors.centerIn: parent
+                            text: "Prefs"
+                            color: prefsView.shown ? Theme.accent1 : Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 2
+                        }
+
+                        MouseArea {
+                            id: prefsMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: {
+                                prefsView.shown = !prefsView.shown;
+                                memoryView.shown = false;
+                            }
                         }
                     }
 
@@ -681,10 +742,32 @@ FloatingWindow {
         }
     }
 
+    // Memory viewer overlay
+    MemoryView {
+        id: memoryView
+        anchors.fill: parent
+        memoryService: memoryService
+    }
+
+    // Preferences overlay
+    PreferencesView {
+        id: prefsView
+        anchors.fill: parent
+        preferences: prefs
+    }
+
     // Escape to hide
     Shortcut {
         sequence: "Escape"
-        onActivated: window.visible = false
+        onActivated: {
+            if (prefsView.shown) {
+                prefsView.shown = false;
+            } else if (memoryView.shown) {
+                memoryView.shown = false;
+            } else {
+                window.visible = false;
+            }
+        }
     }
 
     // Ctrl+N for new chat

@@ -13,24 +13,27 @@ tools to the LLM via the standard MCP protocol.
 
 ## Storage
 
-Memories are stored as plain markdown files organized by topic:
+Memories are stored as encrypted markdown files organized by topic:
 
 ```
 ~/.config/hyprchat/memory/
-├── general.md
-├── linux.md
-├── cpp.md
-├── projects.md
+├── general.md.enc
+├── linux.md.enc
+├── cpp.md.enc
+├── projects.md.enc
 └── ...
 ```
 
 ### Design Principles
 
-- **Append-only** — the model adds to memory files, never overwrites
-- **Human-readable** — plain markdown, easily viewed and edited by hand
+- **Encrypted at rest** — AES-256-GCM, key stored in system keyring
 - **Topic-based** — one file per topic, created on demand
+- **Append-friendly** — the model primarily appends to memory files
+- **Editable** — users can view and edit memories via the built-in
+  memory viewer
+- **Deletable** — users can remove memory topics entirely
 - **Persistent** — survives across chats and daemon restarts
-- **Simple** — no database, no indexing, just files
+- **Simple** — no database, no indexing, just encrypted files
 
 ## How It Works
 

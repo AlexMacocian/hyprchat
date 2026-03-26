@@ -13,6 +13,9 @@ Item {
     property string activeBackend: "copilot"
     property string activeModel: "gpt-4o"
     property real summarizeThreshold: 0.7
+    property int keepRecentMessages: 4
+    property string systemPrompt: "You are a helpful assistant. Be concise."
+    property bool memoryEnabled: true
 
     property bool _loaded: false
 
@@ -29,7 +32,10 @@ Item {
         let data = JSON.stringify({
             active_backend: root.activeBackend,
             active_model: root.activeModel,
-            summarize_threshold: root.summarizeThreshold
+            summarize_threshold: root.summarizeThreshold,
+            keep_recent_messages: root.keepRecentMessages,
+            system_prompt: root.systemPrompt,
+            memory_enabled: root.memoryEnabled
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -56,6 +62,9 @@ Item {
                     if (json.active_backend) root.activeBackend = json.active_backend;
                     if (json.active_model) root.activeModel = json.active_model;
                     if (json.summarize_threshold !== undefined) root.summarizeThreshold = json.summarize_threshold;
+                    if (json.keep_recent_messages !== undefined) root.keepRecentMessages = json.keep_recent_messages;
+                    if (json.system_prompt !== undefined) root.systemPrompt = json.system_prompt;
+                    if (json.memory_enabled !== undefined) root.memoryEnabled = json.memory_enabled;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

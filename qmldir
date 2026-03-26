@@ -10,3 +10,6 @@ GhLoginFlow GhLoginFlow.qml
 Preferences Preferences.qml
 ModelFetcher ModelFetcher.qml
 BackendSwitcher BackendSwitcher.qml
+MemoryService MemoryService.qml
+MemoryView MemoryView.qml
+PreferencesView PreferencesView.qml

@@ -11,6 +11,30 @@ Item {
     property string apiKey: ""
     property string model: "gpt-4o"
     property string systemPrompt: "You are a helpful assistant. Be concise."
+    property bool memoryEnabled: false
+
+    // Static prompts appended to the system prompt
+    readonly property string _memoryPrompt: "You have access to a persistent memory system. Use it proactively:\n" +
+        "READING: At the start of conversations, check relevant memory topics for context. " +
+        "Use memory_list_topics to see what's available, then memory_read for relevant topics.\n" +
+        "WRITING: When you learn something new about the user (preferences, patterns, environment, projects), " +
+        "save it immediately using memory_append. When the user corrects you, update memory. " +
+        "When you discover a useful fact (a working command, a solution), save it.\n" +
+        "Be selective — save facts and preferences, not conversation transcripts. Use concise bullet points."
+
+    readonly property string _toolPrompt: "You have tools available. Use them when they would help answer " +
+        "the user's question accurately. Don't ask permission to use tools — just use them. " +
+        "If a tool call fails, report the error briefly and continue."
+
+    // Assembled system prompt
+    readonly property string _fullSystemPrompt: {
+        let prompt = systemPrompt;
+        if (memoryEnabled) {
+            prompt += "\n\n" + _memoryPrompt;
+        }
+        // TODO: add _toolPrompt when MCP tools are wired up
+        return prompt;
+    }
 
     // Context management — if set, injected after system prompt
     property string contextSummary: ""
@@ -39,7 +63,7 @@ Item {
         _accumulatedResponse = "";
 
         // Build the messages array with system prompt prepended
-        let apiMessages = [{ role: "system", content: systemPrompt }];
+        let apiMessages = [{ role: "system", content: _fullSystemPrompt }];
 
         // If we have a summary, inject it as context
         if (contextSummary.length > 0) {
