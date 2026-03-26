@@ -76,7 +76,7 @@ jobs:
         uses: docker://archlinux:latest
         with:
           entrypoint: bash
-          args: -c "pacman -Sy --noconfirm pacman-contrib && makepkg --printsrcinfo > .SRCINFO"
+          args: -c "EUID=1000 makepkg --printsrcinfo > .SRCINFO"
 
       - name: Publish to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
