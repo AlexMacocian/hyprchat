@@ -39,12 +39,12 @@ created on demand when the model writes to a topic that doesn't exist.
 Each `.md.enc` file starts with a plaintext header line identifying
 the encryption algorithm, followed by the encrypted data:
 
-```
+```txt
 HYPRCHAT:v1:aes-256-cbc\n<encrypted bytes>
 ```
 
 | Field | Value | Purpose |
-|-------|-------|---------|
+| ----- | ----- | ------- |
 | Magic | `HYPRCHAT` | Identifies the file as HyprChat memory |
 | Version | `v1` | Format version for future migration |
 | Algorithm | `aes-256-cbc` | Encryption algorithm identifier |
