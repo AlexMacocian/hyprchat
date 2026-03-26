@@ -441,12 +441,27 @@ FloatingWindow {
             type: "function",
             function: {
                 name: "memory_append",
-                description: "Append content to a memory topic. Creates the topic if it doesn't exist.",
+                description: "Append content to a memory topic. Creates the topic if it doesn't exist. Use for quick additions without needing to read the topic first.",
                 parameters: {
                     type: "object",
                     properties: {
                         topic: { type: "string", description: "Topic name (alphanumeric, hyphens, underscores)" },
                         content: { type: "string", description: "Markdown content to append" }
+                    },
+                    required: ["topic", "content"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "memory_edit",
+                description: "Replace the full content of a memory topic. Creates the topic if it doesn't exist. Use when you need to rewrite, restructure, or remove parts of existing content. Always read the topic first.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        topic: { type: "string", description: "Topic name (alphanumeric, hyphens, underscores)" },
+                        content: { type: "string", description: "Complete markdown content that replaces everything in the topic" }
                     },
                     required: ["topic", "content"]
                 }
@@ -817,6 +832,10 @@ FloatingWindow {
 
             if (name === "memory_append") {
                 return memoryService.appendTopic(args.topic, args.content);
+            }
+
+            if (name === "memory_edit") {
+                return memoryService.editTopic(args.topic, args.content);
             }
 
             if (name === "memory_search") {

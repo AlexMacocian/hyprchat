@@ -60,21 +60,23 @@ format, the corresponding algorithm is used. Files without a header
 | `memory_list_topics` | List all available memory topics | _(none)_ |
 | `memory_read` | Read a memory file by topic | `topic` (string) |
 | `memory_append` | Append content to a memory file | `topic` (string), `content` (string) |
+| `memory_edit` | Replace the full content of a memory file | `topic` (string), `content` (string) |
 | `memory_search` | Search across all memory files | `query` (string) |
 | `memory_delete_topic` | Delete an entire memory topic | `topic` (string) |
-| `memory_edit` | Replace the full content of a memory file | `topic` (string), `content` (string) |
+| `memory_reorganize` | Split a large topic into subtopics | `source_topic` (string), `subtopics` (array) |
 
 ### Behavior
 
 - `memory_list_topics` — returns topic names (filenames without `.md.enc`)
 - `memory_read` — decrypts and returns the full contents of `{topic}.md.enc`
-- `memory_append` — decrypts, appends `content` as a new section,
-  re-encrypts and writes back. Creates the file if it doesn't exist.
+- `memory_append` — appends content to the end of a topic. Creates the
+  file if it doesn't exist. Use for quick additions without reading first.
+- `memory_edit` — replaces the full content of a topic. Creates the file
+  if it doesn't exist. Always read the topic first so existing content
+  is not lost. Use when rewriting, restructuring, or removing entries.
 - `memory_search` — decrypts all files, performs substring/keyword search,
   returns matching excerpts with topic names.
 - `memory_delete_topic` — deletes `{topic}.md.enc` from disk
-- `memory_edit` — replaces the full content of a topic (used by the
-  memory viewer for manual edits)
 
 ## Memory Viewer
 

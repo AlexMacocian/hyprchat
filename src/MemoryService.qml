@@ -198,7 +198,7 @@ Item {
     }
 
     function editTopic(topic, content) {
-        if (!_isValidTopic(topic)) { root.error("Invalid topic name"); return; }
+        if (!_isValidTopic(topic)) { root.error("Invalid topic name"); return "Error: invalid topic name."; }
 
         cache[topic] = content;
 
@@ -211,6 +211,12 @@ Item {
         _cacheVersion++;
         _persistTopic(topic);
         root.topicChanged(topic);
+
+        let lines = content.split("\n").length;
+        if (lines > splitThreshold) {
+            return "Saved '" + topic + "'. WARNING: " + topic + " is now " + lines + " lines (threshold: " + splitThreshold + "). Consider using memory_reorganize to split it into subtopics.";
+        }
+        return "Saved '" + topic + "'.";
     }
 
     function deleteTopic(topic) {

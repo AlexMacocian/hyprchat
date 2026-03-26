@@ -22,23 +22,24 @@ Item {
         "2. Call memory_read on any topic that seems relevant to the user's message\n" +
         "Do this EVERY conversation. Do not skip this step. Do not say 'I don't have memory' — you do.\n\n" +
         "STEP 2 — ALWAYS SAVE NEW INFORMATION:\n" +
-        "After EVERY response where you learned something new, call memory_append to save it. Examples:\n" +
-        "- User tells you their name, preferences, or environment → save to 'user' topic\n" +
-        "- You solve a problem together → save the solution to a relevant topic\n" +
-        "- User corrects you → update the relevant memory topic\n" +
-        "- You learn about a project → save to a project-specific topic\n" +
+        "You have two tools for writing to memory:\n" +
+        "- memory_append: adds content to the end of a topic. Use this for quick additions — no need to read first.\n" +
+        "- memory_edit: replaces the ENTIRE content of a topic. Use this when you need to rewrite, restructure,\n" +
+        "  update existing entries, or remove outdated information. Always memory_read first so you don't lose data.\n" +
+        "Examples of when to save:\n" +
+        "- User tells you their name, preferences, or environment → append to 'user' topic\n" +
+        "- You solve a problem together → append the solution to a relevant topic\n" +
+        "- User corrects you → read the topic, fix the wrong entry, edit the topic\n" +
+        "- You learn about a project → append to a project-specific topic\n" +
         "Use concise bullet points. Do NOT save conversation transcripts.\n\n" +
+
         "STEP 3 — ORGANIZE MEMORY:\n" +
         "Use broad topic names: 'user', 'linux', 'projects' — NOT 'user_birthday' or 'user_name'.\n" +
         "Group related facts under one topic. If you see scattered small topics, consolidate them.\n" +
-        "When a topic gets a size warning after memory_append, use memory_reorganize to split it into subtopics.\n" +
+        "When a topic exceeds ~200 lines, use memory_reorganize to split it into subtopics.\n" +
         "Target 10-200 lines per topic."
 
     property bool webSearchEnabled: false
-
-    readonly property string _toolPrompt: "You have tools available. Use them when they would help answer " +
-        "the user's question accurately. Don't ask permission to use tools — just use them. " +
-        "If a tool call fails, report the error briefly and continue."
 
     readonly property string _webSearchPrompt: "You can search the web using web_search and read pages using web_read_page.\n" +
         "Use web search when the user asks about current events, recent information, or anything you're unsure about.\n" +
