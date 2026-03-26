@@ -13,6 +13,8 @@ Item {
     property int editKeepRecent: 4
     property string editSystemPrompt: ""
     property bool editMemoryEnabled: true
+    property bool editWebSearchEnabled: true
+    property bool editShellEnabled: false
 
     visible: shown
 
@@ -23,6 +25,8 @@ Item {
             editKeepRecent = preferences.keepRecentMessages;
             editSystemPrompt = preferences.systemPrompt;
             editMemoryEnabled = preferences.memoryEnabled;
+            editWebSearchEnabled = preferences.webSearchEnabled;
+            editShellEnabled = preferences.shellEnabled;
         }
     }
 
@@ -81,6 +85,8 @@ Item {
                                 root.preferences.keepRecentMessages = root.editKeepRecent;
                                 root.preferences.systemPrompt = root.editSystemPrompt;
                                 root.preferences.memoryEnabled = root.editMemoryEnabled;
+                                root.preferences.webSearchEnabled = root.editWebSearchEnabled;
+                                root.preferences.shellEnabled = root.editShellEnabled;
                                 root.preferences.save();
                                 root.shown = false;
                             }
@@ -244,6 +250,126 @@ Item {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.editMemoryEnabled = !root.editMemoryEnabled
+                            }
+                        }
+                    }
+
+                    // Separator
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        color: Theme.border
+                    }
+
+                    // --- Web Search Toggle ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "Web Search"
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Allow the model to search the web via DuckDuckGo and read pages."
+                                color: Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 2
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 44
+                            Layout.preferredHeight: 24
+                            radius: 12
+                            color: root.editWebSearchEnabled ? Theme.accent1 : Theme.bg3
+
+                            Rectangle {
+                                x: root.editWebSearchEnabled ? parent.width - width - 3 : 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 18; height: 18; radius: 9
+                                color: Theme.text
+                                Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.editWebSearchEnabled = !root.editWebSearchEnabled
+                            }
+                        }
+                    }
+
+                    // Separator
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        color: Theme.border
+                    }
+
+                    // --- Shell Toggle ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "Shell Commands"
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Allow the model to execute shell commands. Runs as your user — use with caution."
+                                color: Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 2
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 44
+                            Layout.preferredHeight: 24
+                            radius: 12
+                            color: root.editShellEnabled ? Theme.accent1 : Theme.bg3
+
+                            Rectangle {
+                                x: root.editShellEnabled ? parent.width - width - 3 : 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 18; height: 18; radius: 9
+                                color: Theme.text
+                                Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.editShellEnabled = !root.editShellEnabled
                             }
                         }
                     }

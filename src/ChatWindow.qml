@@ -58,6 +58,15 @@ FloatingWindow {
         }
     }
 
+    // Shell service
+    ShellService {
+        id: shellService
+
+        onExecComplete: (toolCallId, result) => {
+            window._resolveAsyncTool(toolCallId, result);
+        }
+    }
+
     // Async tool handling — when a tool is async, we store the pending
     // state and resume when the result arrives
     property var _pendingToolCallMsg: null
@@ -496,10 +505,39 @@ FloatingWindow {
     ]
 
     // Combine active tools based on preferences
+    readonly property var shellTools: [
+        {
+            type: "function",
+            function: {
+                name: "shell_exec",
+                description: "Execute a shell command and return its output (stdout + stderr). Times out after 30s.",
+                parameters: {
+                    type: "object",
+                    properties: { command: { type: "string", description: "The shell command to execute" } },
+                    required: ["command"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "shell_exec_background",
+                description: "Execute a shell command in the background without waiting for output. Use for servers or long-running tasks.",
+                parameters: {
+                    type: "object",
+                    properties: { command: { type: "string", description: "The shell command to run in background" } },
+                    required: ["command"]
+                }
+            }
+        }
+    ]
+
+    // Combine active tools based on preferences
     readonly property var activeTools: {
         let t = [];
         if (prefs.memoryEnabled) t = t.concat(memoryTools);
         if (prefs.webSearchEnabled) t = t.concat(webTools);
+        if (prefs.shellEnabled) t = t.concat(shellTools);
         return t;
     }
 
@@ -515,6 +553,7 @@ FloatingWindow {
         systemPrompt: prefs.systemPrompt
         memoryEnabled: prefs.memoryEnabled
         webSearchEnabled: prefs.webSearchEnabled
+        shellEnabled: prefs.shellEnabled
         tools: window.activeTools
 
         onTokenReceived: (token) => {
@@ -578,6 +617,18 @@ FloatingWindow {
                             webSearch.search(args.query, tc.id);
                         } else {
                             webSearch.fetchPage(args.url, tc.id);
+                        }
+                    } catch (e) {
+                        toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
+                    }
+                } else if (tc.name === "shell_exec" || tc.name === "shell_exec_background") {
+                    asyncCount++;
+                    try {
+                        let args = JSON.parse(tc.arguments);
+                        if (tc.name === "shell_exec") {
+                            shellService.exec(args.command, tc.id);
+                        } else {
+                            shellService.execBackground(args.command, tc.id);
                         }
                     } catch (e) {
                         toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });

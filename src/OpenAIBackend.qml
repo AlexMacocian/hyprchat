@@ -44,6 +44,12 @@ Item {
         "Use web search when the user asks about current events, recent information, or anything you're unsure about.\n" +
         "After searching, you can read specific pages for more detail. Cite your sources with URLs."
 
+    property bool shellEnabled: false
+
+    readonly property string _shellPrompt: "You can execute shell commands using shell_exec (waits for output) and shell_exec_background (fire-and-forget).\n" +
+        "Use shell commands when the user asks you to check system state, install packages, run scripts, build projects, or interact with the filesystem.\n" +
+        "Always show the user what command you're running. Be careful with destructive commands — confirm with the user first."
+
     // Assembled system prompt
     readonly property string _fullSystemPrompt: {
         let prompt = systemPrompt;
@@ -52,6 +58,9 @@ Item {
         }
         if (webSearchEnabled) {
             prompt += "\n\n" + _webSearchPrompt;
+        }
+        if (shellEnabled) {
+            prompt += "\n\n" + _shellPrompt;
         }
 
         return prompt;
