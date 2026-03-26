@@ -1098,6 +1098,7 @@ FloatingWindow {
                     }
                     messageModel.append({ role: "user", text: text, sent: true });
                     messageModel.append({ role: "assistant", text: "...", sent: true });
+                    window._toolLoopCount = 0;
                     backend.send(messageModel);
                 }
             }
