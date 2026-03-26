@@ -46,6 +46,46 @@ Item {
         if (editingProfile && modelFetcher) {
             _fetchModelsForBackend(editProfileBackend);
         }
+        _autoSaveProfile();
+    }
+
+    onEditProfileModelChanged: _autoSaveProfile()
+    onEditProfileNameChanged: _autoSaveProfile()
+    onEditProfileIconChanged: _autoSaveProfile()
+    onEditProfilePromptChanged: _autoSaveProfile()
+
+    // Auto-save profile changes (debounced)
+    property bool _autoSaveQueued: false
+
+    function _autoSaveProfile() {
+        if (!editingProfile || creatingProfile || !preferences) return;
+        if (editProfileOrigName.length === 0) return;
+        if (!_autoSaveQueued) {
+            _autoSaveQueued = true;
+            autoSaveTimer.running = true;
+        }
+    }
+
+    Timer {
+        id: autoSaveTimer
+        interval: 500  // debounce 500ms
+        running: false
+        repeat: false
+        onTriggered: {
+            root._autoSaveQueued = false;
+            if (!root.editingProfile || root.creatingProfile) return;
+            let prof = {
+                name: root.editProfileName,
+                icon: root.editProfileIcon,
+                backend: root.editProfileBackend,
+                model: root.editProfileModel,
+                systemPrompt: root.editProfilePrompt
+            };
+            root.preferences.updateProfile(root.editProfileOrigName, prof);
+            // Update origName in case name changed
+            root.editProfileOrigName = root.editProfileName;
+            console.log("PreferencesView: auto-saved profile", prof.name);
+        }
     }
 
     function _fetchModelsForBackend(backend) {
@@ -509,27 +549,39 @@ Item {
                             }
 
                             // System prompt
-                            Rectangle {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 60
-                                radius: 4
-                                color: Theme.bg2
-                                border.color: Theme.border
-                                border.width: 1
+                                spacing: 2
 
-                                TextEdit {
-                                    anchors.fill: parent
-                                    anchors.margins: 6
-                                    text: root.editProfilePrompt
-                                    color: Theme.text
+                                Text {
+                                    text: "System Prompt"
+                                    color: Theme.textDim
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSize - 1
-                                    wrapMode: TextEdit.Wrap
-                                    onTextChanged: root.editProfilePrompt = text
+                                    font.pixelSize: Theme.fontSize - 2
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 60
+                                    radius: 4
+                                    color: Theme.bg2
+                                    border.color: Theme.border
+                                    border.width: 1
+
+                                    TextEdit {
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        text: root.editProfilePrompt
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize - 1
+                                        wrapMode: TextEdit.Wrap
+                                        onTextChanged: root.editProfilePrompt = text
+                                    }
                                 }
                             }
 
-                            // Save / Cancel buttons
+                            // Done button
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 8
@@ -540,33 +592,11 @@ Item {
                                     Layout.preferredWidth: 60
                                     Layout.preferredHeight: 26
                                     radius: 4
-                                    color: cancelProfMouse.containsMouse ? Theme.bg3 : Theme.bg2
+                                    color: doneProfMouse.containsMouse ? Theme.accent2 : Theme.accent1
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "Cancel"
-                                        color: Theme.textDim
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSize - 2
-                                    }
-
-                                    MouseArea {
-                                        id: cancelProfMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.editingProfile = false
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.preferredWidth: 60
-                                    Layout.preferredHeight: 26
-                                    radius: 4
-                                    color: saveProfMouse.containsMouse ? Theme.accent2 : Theme.accent1
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "Save"
+                                        text: "Done"
                                         color: Theme.bg0
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSize - 2
@@ -574,21 +604,19 @@ Item {
                                     }
 
                                     MouseArea {
-                                        id: saveProfMouse
+                                        id: doneProfMouse
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: {
-                                            let prof = {
-                                                name: root.editProfileName,
-                                                icon: root.editProfileIcon,
-                                                backend: root.editProfileBackend,
-                                                model: root.editProfileModel,
-                                                systemPrompt: root.editProfilePrompt
-                                            };
-                                            if (root.creatingProfile) {
+                                            if (root.creatingProfile && root.editProfileName.length > 0) {
+                                                let prof = {
+                                                    name: root.editProfileName,
+                                                    icon: root.editProfileIcon,
+                                                    backend: root.editProfileBackend,
+                                                    model: root.editProfileModel,
+                                                    systemPrompt: root.editProfilePrompt
+                                                };
                                                 root.preferences.addProfile(prof);
-                                            } else {
-                                                root.preferences.updateProfile(root.editProfileOrigName, prof);
                                             }
                                             root.editingProfile = false;
                                         }
