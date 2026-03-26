@@ -43,7 +43,15 @@ visible terminal window
 
 ## Quick Start
 
-### Dependencies
+### Install from AUR
+
+```bash
+paru -S hyprchat
+```
+
+### Manual Install
+
+#### Dependencies
 
 - [QuickShell](https://quickshell.outfoxxed.me) (0.2+)
 - Node.js (for web scraper)
