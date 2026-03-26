@@ -631,7 +631,7 @@ FloatingWindow {
 
     // Tool-use loop counter
     property int _toolLoopCount: 0
-    readonly property int _maxToolLoops: 10
+    readonly property int _maxToolLoops: 100
 
     OpenAIBackend {
         id: backend
