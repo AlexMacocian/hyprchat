@@ -39,21 +39,27 @@ Item {
     // Context management — if set, injected after system prompt
     property string contextSummary: ""
 
+    // Tool definitions (set by ChatWindow when memory is enabled)
+    property var tools: []
+
     // Extra headers for Copilot internal API
     property var extraHeaders: []
 
     // Signals
     signal tokenReceived(string token)
+    signal toolCallReceived(var toolCalls)
     signal usageReceived(int promptTokens, int completionTokens, int totalTokens)
     signal responseFinished()
     signal responseError(string error)
 
     // State
-    readonly property bool streaming: curlProcess.running
+    readonly property bool streaming: curlProcess.running || writeProcess.running
     property string _accumulatedResponse: ""
+    property var _accumulatedToolCalls: []  // [{id, name, arguments}]
 
     property string _body: ""
     readonly property string _tmpFile: "/tmp/hyprchat-req.json"
+    property var _pendingMessages: []  // full message list for tool-use loop
 
     function send(messages) {
         if (curlProcess.running || writeProcess.running) {
@@ -61,6 +67,7 @@ Item {
         }
 
         _accumulatedResponse = "";
+        _accumulatedToolCalls = [];
 
         // Build the messages array with system prompt prepended
         let apiMessages = [{ role: "system", content: _fullSystemPrompt }];
@@ -78,16 +85,46 @@ Item {
             apiMessages.push({ role: msg.role, content: msg.text });
         }
 
-        _body = JSON.stringify({
+        _sendApiMessages(apiMessages);
+    }
+
+    // Send raw API messages (used by both initial send and tool-use loop)
+    function _sendApiMessages(apiMessages) {
+        _pendingMessages = apiMessages;
+
+        let body = {
             model: model,
             messages: apiMessages,
             stream: true
-        });
+        };
 
-        // Step 1: Write body to temp file
+        // Include tool definitions if available
+        if (tools.length > 0) {
+            body.tools = tools;
+        }
+
+        _body = JSON.stringify(body);
+
         writeProcess.command = ["bash", "-c", "cat > " + _tmpFile];
         writeProcess.stdinEnabled = true;
         writeProcess.running = true;
+    }
+
+    // Continue after tool execution — append tool results and re-send
+    function continueWithToolResults(toolCallMsg, toolResults) {
+        let msgs = _pendingMessages.slice();
+
+        // Append the assistant's tool_call message
+        msgs.push(toolCallMsg);
+
+        // Append each tool result
+        for (let i = 0; i < toolResults.length; i++) {
+            msgs.push(toolResults[i]);
+        }
+
+        _accumulatedResponse = "";
+        _accumulatedToolCalls = [];
+        _sendApiMessages(msgs);
     }
 
     // Step 1: Write JSON to temp file
@@ -129,7 +166,6 @@ Item {
         stdout: SplitParser {
             splitMarker: "\n\n"
             onRead: (chunk) => {
-                // Each chunk is one or more SSE events separated by blank lines
                 let lines = chunk.split("\n");
                 for (let i = 0; i < lines.length; i++) {
                     let line = lines[i];
@@ -138,19 +174,34 @@ Item {
                     if (payload === "[DONE]") continue;
                     try {
                         let json = JSON.parse(payload);
-                        // Stream content tokens
-                        if (json.choices && json.choices[0] && json.choices[0].delta && json.choices[0].delta.content) {
-                            let content = json.choices[0].delta.content;
-                            root._accumulatedResponse += content;
-                            root.tokenReceived(content);
+                        let delta = json.choices && json.choices[0] && json.choices[0].delta;
+                        if (delta) {
+                            // Stream content tokens
+                            if (delta.content) {
+                                root._accumulatedResponse += delta.content;
+                                root.tokenReceived(delta.content);
+                            }
+                            // Accumulate tool calls (streamed in chunks)
+                            if (delta.tool_calls) {
+                                for (let t = 0; t < delta.tool_calls.length; t++) {
+                                    let tc = delta.tool_calls[t];
+                                    let idx = tc.index !== undefined ? tc.index : 0;
+                                    // Initialize slot if needed
+                                    while (root._accumulatedToolCalls.length <= idx) {
+                                        root._accumulatedToolCalls.push({ id: "", name: "", arguments: "" });
+                                    }
+                                    if (tc.id) root._accumulatedToolCalls[idx].id = tc.id;
+                                    if (tc.function && tc.function.name) root._accumulatedToolCalls[idx].name = tc.function.name;
+                                    if (tc.function && tc.function.arguments) root._accumulatedToolCalls[idx].arguments += tc.function.arguments;
+                                }
+                            }
                         }
-                        // Capture usage stats (usually in the last chunk)
+                        // Capture usage stats
                         if (json.usage) {
-                            let u = json.usage;
                             root.usageReceived(
-                                u.prompt_tokens || 0,
-                                u.completion_tokens || 0,
-                                u.total_tokens || 0
+                                json.usage.prompt_tokens || 0,
+                                json.usage.completion_tokens || 0,
+                                json.usage.total_tokens || 0
                             );
                         }
                     } catch (e) {}
@@ -168,9 +219,12 @@ Item {
         }
 
         onExited: (exitCode, exitStatus) => {
-            console.log("OpenAIBackend: curl exited, code:", exitCode, "streamed:", root._accumulatedResponse.length, "chars");
-            if (exitCode !== 0 && root._accumulatedResponse.length === 0) {
+            console.log("OpenAIBackend: curl exited, code:", exitCode, "streamed:", root._accumulatedResponse.length, "chars, toolCalls:", root._accumulatedToolCalls.length);
+            if (exitCode !== 0 && root._accumulatedResponse.length === 0 && root._accumulatedToolCalls.length === 0) {
                 root.responseError("Request failed (exit code " + exitCode + ")");
+            } else if (root._accumulatedToolCalls.length > 0) {
+                // Model wants to call tools — emit for ChatWindow to handle
+                root.toolCallReceived(root._accumulatedToolCalls);
             } else {
                 root.responseFinished();
             }

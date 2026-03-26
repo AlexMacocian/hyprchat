@@ -351,6 +351,61 @@ FloatingWindow {
     }
 
     // LLM backend
+    // Memory tool definitions (OpenAI function calling format)
+    readonly property var memoryTools: [
+        {
+            type: "function",
+            function: {
+                name: "memory_list_topics",
+                description: "List all available memory topics",
+                parameters: { type: "object", properties: {}, required: [] }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "memory_read",
+                description: "Read the contents of a memory topic",
+                parameters: {
+                    type: "object",
+                    properties: { topic: { type: "string", description: "Topic name" } },
+                    required: ["topic"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "memory_append",
+                description: "Append content to a memory topic. Creates the topic if it doesn't exist.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        topic: { type: "string", description: "Topic name (alphanumeric, hyphens, underscores)" },
+                        content: { type: "string", description: "Markdown content to append" }
+                    },
+                    required: ["topic", "content"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "memory_search",
+                description: "Search across all memory topics for a keyword or phrase",
+                parameters: {
+                    type: "object",
+                    properties: { query: { type: "string", description: "Search query" } },
+                    required: ["query"]
+                }
+            }
+        }
+    ]
+
+    // Tool-use loop counter
+    property int _toolLoopCount: 0
+    readonly property int _maxToolLoops: 10
+
     OpenAIBackend {
         id: backend
         model: window.activeModel
@@ -358,9 +413,9 @@ FloatingWindow {
         contextSummary: window._activeSummary
         systemPrompt: prefs.systemPrompt
         memoryEnabled: prefs.memoryEnabled
+        tools: prefs.memoryEnabled ? window.memoryTools : []
 
         onTokenReceived: (token) => {
-            // Update the last assistant message in-place
             let idx = messageModel.count - 1;
             if (idx >= 0 && messageModel.get(idx).role === "assistant") {
                 let current = messageModel.get(idx).text;
@@ -372,8 +427,48 @@ FloatingWindow {
             }
         }
 
+        onToolCallReceived: (toolCalls) => {
+            console.log("ChatWindow: received", toolCalls.length, "tool calls");
+            window._toolLoopCount++;
+
+            if (window._toolLoopCount > window._maxToolLoops) {
+                console.warn("ChatWindow: tool loop limit reached");
+                let idx = messageModel.count - 1;
+                if (idx >= 0) {
+                    messageModel.setProperty(idx, "text", (messageModel.get(idx).text || "") + "\n\n*[Tool loop limit reached]*");
+                }
+                return;
+            }
+
+            // Execute each tool call and collect results
+            let toolCallMsg = {
+                role: "assistant",
+                content: null,
+                tool_calls: toolCalls.map(tc => ({
+                    id: tc.id,
+                    type: "function",
+                    function: { name: tc.name, arguments: tc.arguments }
+                }))
+            };
+
+            let toolResults = [];
+            for (let i = 0; i < toolCalls.length; i++) {
+                let tc = toolCalls[i];
+                let result = window.executeMemoryTool(tc.name, tc.arguments);
+                console.log("ChatWindow: tool", tc.name, "->", result.substring(0, 100));
+                toolResults.push({
+                    role: "tool",
+                    tool_call_id: tc.id,
+                    content: result
+                });
+            }
+
+            // Continue the conversation with tool results
+            backend.continueWithToolResults(toolCallMsg, toolResults);
+        }
+
         onResponseFinished: {
-            // Check if we need to summarize
+            window._toolLoopCount = 0;
             if (!window._summarizing && window.contextUsage >= window.summarizeThreshold) {
                 window.performSummarization();
             }
@@ -386,10 +481,49 @@ FloatingWindow {
         }
 
         onResponseError: (error) => {
+            window._toolLoopCount = 0;
             let idx = messageModel.count - 1;
             if (idx >= 0 && messageModel.get(idx).role === "assistant") {
-                messageModel.set(idx, { role: "assistant", text: "**Error:** " + error });
+                messageModel.set(idx, { role: "assistant", text: "**Error:** " + error, sent: true });
             }
+        }
+    }
+
+    // Execute a memory tool and return the result as a string
+    function executeMemoryTool(name, argsJson) {
+        try {
+            let args = JSON.parse(argsJson);
+
+            if (name === "memory_list_topics") {
+                let topics = memoryService.listTopics();
+                if (topics.length === 0) return "No memory topics found.";
+                return "Available topics:\n" + topics.join("\n");
+            }
+
+            if (name === "memory_read") {
+                let content = memoryService.readTopic(args.topic);
+                if (content.length === 0) return "Topic '" + args.topic + "' is empty or does not exist.";
+                return content;
+            }
+
+            if (name === "memory_append") {
+                memoryService.appendTopic(args.topic, args.content);
+                return "Appended to topic '" + args.topic + "'.";
+            }
+
+            if (name === "memory_search") {
+                let results = memoryService.search(args.query);
+                if (results.length === 0) return "No results for '" + args.query + "'.";
+                let out = "";
+                for (let i = 0; i < results.length; i++) {
+                    out += "### " + results[i].topic + "\n" + results[i].matches + "\n\n";
+                }
+                return out.trim();
+            }
+
+            return "Unknown tool: " + name;
+        } catch (e) {
+            return "Tool error: " + e;
         }
     }
 
