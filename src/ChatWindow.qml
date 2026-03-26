@@ -910,34 +910,31 @@ FloatingWindow {
 
                     Item { Layout.fillWidth: true }
 
-                    // Clickable backend/model label
+                    // Profile switcher label
                     Rectangle {
                         Layout.preferredHeight: 24
-                        Layout.preferredWidth: backendLabel.implicitWidth + 16
+                        Layout.preferredWidth: profileLabel.implicitWidth + 16
                         radius: 4
-                        color: backendLabelMouse.containsMouse ? Theme.bg2 : "transparent"
+                        color: profileLabelMouse.containsMouse ? Theme.bg2 : "transparent"
 
                         Text {
-                            id: backendLabel
+                            id: profileLabel
                             anchors.centerIn: parent
-                            text: window.activeBackendName + " · " + window.activeModel
+                            text: {
+                                let p = prefs.activeProfile;
+                                return (p.icon || "🤖") + " " + p.name;
+                            }
                             color: Theme.textDim
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSize - 1
                         }
 
                         MouseArea {
-                            id: backendLabelMouse
+                            id: profileLabelMouse
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: {
-                                backendSwitcher.shown = !backendSwitcher.shown;
-                                if (backendSwitcher.shown) {
-                                    backendSwitcher.currentBackend = window.activeBackendName;
-                                    backendSwitcher.currentModel = window.activeModel;
-                                    backendSwitcher.loadingModels = true;
-                                    modelFetcher.fetch();
-                                }
+                                profileSwitcher.shown = !profileSwitcher.shown;
                             }
                         }
                     }
@@ -949,6 +946,34 @@ FloatingWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
                 color: Theme.border
+            }
+
+            // Profile switcher popup
+            ProfileSwitcher {
+                id: profileSwitcher
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                profiles: prefs.profiles
+                activeProfileName: prefs.activeProfileName
+
+                onProfileSelected: (name) => {
+                    let oldBackend = window.activeBackendName;
+                    prefs.switchProfile(name);
+                    // Clear chat on profile switch
+                    messageModel.clear();
+                    window.actualPromptTokens = -1;
+                    window._activeSummary = "";
+                    // Re-auth if backend changed
+                    if (prefs.activeBackend !== oldBackend) {
+                        if (prefs.activeBackend === "copilot") {
+                            initCopilotAuth();
+                        } else if (prefs.activeBackend === "ollama") {
+                            backend.apiKey = "ollama";
+                        } else {
+                            keyring.lookup(prefs.activeBackend);
+                        }
+                    }
+                }
             }
 
             // Backend/model switcher popup
@@ -1117,6 +1142,7 @@ FloatingWindow {
         id: prefsView
         anchors.fill: parent
         preferences: prefs
+        modelFetcher: modelFetcher
     }
 
     // Escape to hide

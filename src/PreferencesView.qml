@@ -7,6 +7,7 @@ Item {
 
     property bool shown: false
     property var preferences: null
+    property var modelFetcher: null  // set from ChatWindow
 
     // Local copies for editing (not applied until Save)
     property real editThreshold: 0.7
@@ -16,6 +17,18 @@ Item {
     property bool editWebSearchEnabled: true
     property bool editShellEnabled: false
 
+    // Profile editor state
+    property bool editingProfile: false
+    property bool creatingProfile: false
+    property string editProfileOrigName: ""
+    property string editProfileName: ""
+    property string editProfileIcon: "🤖"
+    property string editProfileBackend: "copilot"
+    property string editProfileModel: "gpt-4o"
+    property string editProfilePrompt: ""
+    property var editProfileModels: []  // fetched models for current backend
+    property bool editProfileModelLoading: false
+
     visible: shown
 
     onShownChanged: {
@@ -23,10 +36,34 @@ Item {
             // Load current values into edit fields
             editThreshold = preferences.summarizeThreshold;
             editKeepRecent = preferences.keepRecentMessages;
-            editSystemPrompt = preferences.systemPrompt;
             editMemoryEnabled = preferences.memoryEnabled;
             editWebSearchEnabled = preferences.webSearchEnabled;
             editShellEnabled = preferences.shellEnabled;
+        }
+    }
+
+    onEditProfileBackendChanged: {
+        if (editingProfile && modelFetcher) {
+            _fetchModelsForBackend(editProfileBackend);
+        }
+    }
+
+    function _fetchModelsForBackend(backend) {
+        if (!modelFetcher) return;
+        editProfileModelLoading = true;
+        editProfileModels = [];
+        modelFetcher.backendName = backend;
+        modelFetcher.fetch();
+    }
+
+    // Listen for model fetcher completion
+    Connections {
+        target: root.modelFetcher
+        function onFetchComplete() {
+            if (root.editingProfile) {
+                root.editProfileModels = root.modelFetcher.models;
+                root.editProfileModelLoading = false;
+            }
         }
     }
 
@@ -83,7 +120,6 @@ Item {
                             onClicked: {
                                 root.preferences.summarizeThreshold = root.editThreshold;
                                 root.preferences.keepRecentMessages = root.editKeepRecent;
-                                root.preferences.systemPrompt = root.editSystemPrompt;
                                 root.preferences.memoryEnabled = root.editMemoryEnabled;
                                 root.preferences.webSearchEnabled = root.editWebSearchEnabled;
                                 root.preferences.shellEnabled = root.editShellEnabled;
@@ -141,49 +177,423 @@ Item {
 
                     Item { Layout.preferredHeight: 8 }
 
-                    // --- System Prompt ---
+                    // --- Profiles ---
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
                         spacing: 4
 
-                        Text {
-                            text: "System Prompt"
-                            color: Theme.text
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            font.bold: true
-                        }
-
-                        Text {
-                            text: "Instructions sent to the model at the start of every conversation."
-                            color: Theme.textDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize - 2
+                        RowLayout {
                             Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                        }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Math.max(promptEdit.implicitHeight + 16, 80)
-                            radius: 6
-                            color: Theme.bg2
-                            border.color: promptEdit.activeFocus ? Theme.accent1 : Theme.border
-                            border.width: 1
-
-                            TextEdit {
-                                id: promptEdit
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                text: root.editSystemPrompt
+                            Text {
+                                text: "Profiles"
                                 color: Theme.text
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSize
-                                wrapMode: TextEdit.Wrap
-                                selectByMouse: true
-                                onTextChanged: root.editSystemPrompt = text
+                                font.bold: true
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            // New profile button
+                            Rectangle {
+                                Layout.preferredHeight: 22
+                                Layout.preferredWidth: newProfLabel.implicitWidth + 12
+                                radius: 4
+                                color: newProfMouse.containsMouse ? Theme.accent2 : Theme.accent1
+
+                                Text {
+                                    id: newProfLabel
+                                    anchors.centerIn: parent
+                                    text: "+ New"
+                                    color: Theme.bg0
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize - 2
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    id: newProfMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        root.creatingProfile = true;
+                                        root.editingProfile = true;
+                                        root.editProfileOrigName = "";
+                                        root.editProfileName = "";
+                                        root.editProfileIcon = "🤖";
+                                        root.editProfileBackend = "copilot";
+                                        root.editProfileModel = "gpt-4o";
+                                        root.editProfilePrompt = "You are a helpful assistant.";
+                                        root._fetchModelsForBackend("copilot");
+                                    }
+                                }
+                            }
+                        }
+
+                        // Profile list
+                        Column {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            visible: !root.editingProfile
+
+                            Repeater {
+                                model: root.preferences ? root.preferences.profiles : []
+
+                                Rectangle {
+                                    width: parent ? parent.width : 0
+                                    height: 44
+                                    radius: 6
+                                    color: "transparent"
+
+                                    Text {
+                                        id: profIcon
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: modelData.icon || "🤖"
+                                        font.pixelSize: Theme.fontSize + 4
+                                        width: 28
+                                    }
+
+                                    Column {
+                                        anchors.left: profIcon.right
+                                        anchors.leftMargin: 8
+                                        anchors.right: profBtns.left
+                                        anchors.rightMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 0
+
+                                        Text {
+                                            text: modelData.name
+                                            color: Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSize
+                                            font.bold: modelData.name === root.preferences.activeProfileName
+                                        }
+
+                                        Text {
+                                            text: modelData.backend + " · " + modelData.model
+                                            color: Theme.textDim
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSize - 2
+                                        }
+                                    }
+
+                                    Row {
+                                        id: profBtns
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 4
+
+                                        Rectangle {
+                                            width: 40; height: 22; radius: 4
+                                            color: editBtnMouse.containsMouse ? Theme.bg3 : "transparent"
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "Edit"
+                                                color: Theme.textDim
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSize - 2
+                                            }
+
+                                            MouseArea {
+                                                id: editBtnMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    root.creatingProfile = false;
+                                                    root.editingProfile = true;
+                                                    root.editProfileOrigName = modelData.name;
+                                                    root.editProfileName = modelData.name;
+                                                    root.editProfileIcon = modelData.icon || "🤖";
+                                                    root.editProfileBackend = modelData.backend;
+                                                    root.editProfileModel = modelData.model;
+                                                    root.editProfilePrompt = modelData.systemPrompt;
+                                                    root._fetchModelsForBackend(modelData.backend);
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: 22; height: 22; radius: 4
+                                            color: delBtnMouse.containsMouse ? Theme.dangerBg : "transparent"
+                                            visible: modelData.name !== "Assistant"
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "×"
+                                                color: delBtnMouse.containsMouse ? Theme.danger : Theme.textDim
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSize
+                                            }
+
+                                            MouseArea {
+                                                id: delBtnMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: root.preferences.deleteProfile(modelData.name)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Profile editor form
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            visible: root.editingProfile
+
+                            // Name + Icon row
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    Layout.preferredWidth: 40
+                                    Layout.preferredHeight: 32
+                                    radius: 4
+                                    color: Theme.bg2
+
+                                    TextEdit {
+                                        anchors.centerIn: parent
+                                        text: root.editProfileIcon
+                                        font.pixelSize: Theme.fontSize + 4
+                                        onTextChanged: root.editProfileIcon = text
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    radius: 4
+                                    color: Theme.bg2
+                                    border.color: Theme.border
+                                    border.width: 1
+
+                                    TextEdit {
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        text: root.editProfileName
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                        onTextChanged: root.editProfileName = text
+                                    }
+                                }
+                            }
+
+                            // Backend selector
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Text {
+                                    text: "Backend"
+                                    color: Theme.textDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize - 2
+                                }
+
+                                Row {
+                                    spacing: 4
+
+                                    Repeater {
+                                        model: ["copilot", "openai", "claude", "ollama"]
+
+                                        Rectangle {
+                                            width: bkLabel.implicitWidth + 12
+                                            height: 28
+                                            radius: 4
+                                            color: modelData === root.editProfileBackend ? Theme.accent1 : (bkMouse.containsMouse ? Theme.bg3 : Theme.bg2)
+
+                                            Text {
+                                                id: bkLabel
+                                                anchors.centerIn: parent
+                                                text: modelData
+                                                color: modelData === root.editProfileBackend ? Theme.bg0 : Theme.text
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: Theme.fontSize - 1
+                                                font.bold: modelData === root.editProfileBackend
+                                            }
+
+                                            MouseArea {
+                                                id: bkMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: root.editProfileBackend = modelData
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Model selector
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Text {
+                                    text: root.editProfileModelLoading ? "Model (loading...)" : "Model"
+                                    color: Theme.textDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize - 2
+                                }
+
+                                // Current selection
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 28
+                                    radius: 4
+                                    color: Theme.bg3
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        text: root.editProfileModel || "(select a model)"
+                                        color: root.editProfileModel ? Theme.text : Theme.textDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize - 1
+                                    }
+                                }
+
+                                // Scrollable model list
+                                Flickable {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.min(modelListCol.implicitHeight, 120)
+                                    contentHeight: modelListCol.implicitHeight
+                                    clip: true
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    visible: root.editProfileModels.length > 0
+
+                                    Column {
+                                        id: modelListCol
+                                        width: parent.width
+                                        spacing: 1
+
+                                        Repeater {
+                                            model: root.editProfileModels
+
+                                            Rectangle {
+                                                width: parent ? parent.width : 0
+                                                height: 26
+                                                radius: 3
+                                                color: modelData.id === root.editProfileModel ? Theme.accent1 : (mdlMouse.containsMouse ? Theme.bg3 : "transparent")
+
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 8
+                                                    text: modelData.name || modelData.id
+                                                    color: modelData.id === root.editProfileModel ? Theme.bg0 : Theme.text
+                                                    font.family: Theme.fontFamily
+                                                    font.pixelSize: Theme.fontSize - 2
+                                                    font.bold: modelData.id === root.editProfileModel
+                                                }
+
+                                                MouseArea {
+                                                    id: mdlMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: root.editProfileModel = modelData.id
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // System prompt
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 60
+                                radius: 4
+                                color: Theme.bg2
+                                border.color: Theme.border
+                                border.width: 1
+
+                                TextEdit {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    text: root.editProfilePrompt
+                                    color: Theme.text
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize - 1
+                                    wrapMode: TextEdit.Wrap
+                                    onTextChanged: root.editProfilePrompt = text
+                                }
+                            }
+
+                            // Save / Cancel buttons
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Item { Layout.fillWidth: true }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 60
+                                    Layout.preferredHeight: 26
+                                    radius: 4
+                                    color: cancelProfMouse.containsMouse ? Theme.bg3 : Theme.bg2
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "Cancel"
+                                        color: Theme.textDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize - 2
+                                    }
+
+                                    MouseArea {
+                                        id: cancelProfMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: root.editingProfile = false
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 60
+                                    Layout.preferredHeight: 26
+                                    radius: 4
+                                    color: saveProfMouse.containsMouse ? Theme.accent2 : Theme.accent1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "Save"
+                                        color: Theme.bg0
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize - 2
+                                        font.bold: true
+                                    }
+
+                                    MouseArea {
+                                        id: saveProfMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            let prof = {
+                                                name: root.editProfileName,
+                                                icon: root.editProfileIcon,
+                                                backend: root.editProfileBackend,
+                                                model: root.editProfileModel,
+                                                systemPrompt: root.editProfilePrompt
+                                            };
+                                            if (root.creatingProfile) {
+                                                root.preferences.addProfile(prof);
+                                            } else {
+                                                root.preferences.updateProfile(root.editProfileOrigName, prof);
+                                            }
+                                            root.editingProfile = false;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

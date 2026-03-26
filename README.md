@@ -21,6 +21,8 @@ tool support, API details
 - [Authentication](Documentation/authentication.md) - API key management,
 keyring integration, sign-out
 - [Frontend](Documentation/frontend.md) - QML UI, theming, Hyprland integration
+- [Profiles](Documentation/profiles.md) - AI personality profiles,
+per-profile backend/model/prompt
 - [Backend Implementation](Documentation/backend-implementation.md) - ChatService,
 tool-use loop, configuration
 - [System Prompt](Documentation/system-prompt.md) - prompt assembly,

@@ -108,14 +108,14 @@ Item {
                         Layout.preferredHeight: 24
                         Layout.preferredWidth: deleteLabel.implicitWidth + 12
                         radius: 4
-                        color: deleteMouse.containsMouse ? "#802020" : "transparent"
+                        color: deleteMouse.containsMouse ? Theme.dangerBg : "transparent"
                         visible: root.selectedTopic.length > 0
 
                         Text {
                             id: deleteLabel
                             anchors.centerIn: parent
                             text: "Delete"
-                            color: deleteMouse.containsMouse ? "#FF6060" : Theme.textDim
+                            color: deleteMouse.containsMouse ? Theme.danger : Theme.textDim
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSize - 2
                         }

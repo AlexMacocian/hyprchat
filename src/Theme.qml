@@ -17,6 +17,10 @@ QtObject {
     readonly property color text: "#E8CFC0"
     readonly property color textDim: "#A08070"
 
+    // Danger / destructive actions
+    readonly property color danger: "#FF6060"
+    readonly property color dangerBg: "#802020"
+
     // Font
     readonly property string fontFamily: "JetBrainsMono Nerd Font"
     readonly property int fontSize: 12

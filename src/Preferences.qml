@@ -18,7 +18,72 @@ Item {
     property bool memoryEnabled: true
     property int memorySplitThreshold: 200
     property bool webSearchEnabled: true
-    property bool shellEnabled: false  // off by default for safety  // lines before suggesting split
+    property bool shellEnabled: false
+
+    // --- Profiles ---
+    property string activeProfileName: "Assistant"
+    property var profiles: [
+        {
+            name: "Assistant",
+            icon: "🤖",
+            backend: "copilot",
+            model: "gpt-4o",
+            systemPrompt: "You are a helpful assistant. Be concise."
+        }
+    ]
+
+    // Convenience: get the active profile object
+    readonly property var activeProfile: {
+        for (let i = 0; i < profiles.length; i++) {
+            if (profiles[i].name === activeProfileName) return profiles[i];
+        }
+        return profiles[0];
+    }
+
+    // Switch to a profile — updates activeBackend/model/systemPrompt
+    function switchProfile(name) {
+        activeProfileName = name;
+        let p = activeProfile;
+        activeBackend = p.backend;
+        activeModel = p.model;
+        systemPrompt = p.systemPrompt;
+        save();
+    }
+
+    function addProfile(profile) {
+        let p = profiles.slice();
+        p.push(profile);
+        profiles = p;
+        save();
+    }
+
+    function updateProfile(name, profile) {
+        let p = profiles.slice();
+        for (let i = 0; i < p.length; i++) {
+            if (p[i].name === name) {
+                p[i] = profile;
+                break;
+            }
+        }
+        profiles = p;
+        // If we updated the active profile, refresh current values
+        if (name === activeProfileName) {
+            activeBackend = profile.backend;
+            activeModel = profile.model;
+            systemPrompt = profile.systemPrompt;
+        }
+        save();
+    }
+
+    function deleteProfile(name) {
+        if (name === "Assistant") return; // can't delete default
+        let p = profiles.filter(function(pr) { return pr.name !== name; });
+        profiles = p;
+        if (activeProfileName === name) {
+            switchProfile("Assistant");
+        }
+        save();
+    }
 
     property bool _loaded: false
 
@@ -33,11 +98,10 @@ Item {
 
     function save() {
         let data = JSON.stringify({
-            active_backend: root.activeBackend,
-            active_model: root.activeModel,
+            active_profile: root.activeProfileName,
+            profiles: root.profiles,
             summarize_threshold: root.summarizeThreshold,
             keep_recent_messages: root.keepRecentMessages,
-            system_prompt: root.systemPrompt,
             memory_enabled: root.memoryEnabled,
             memory_split_threshold: root.memorySplitThreshold,
             web_search_enabled: root.webSearchEnabled,
@@ -65,11 +129,15 @@ Item {
             if (exitCode === 0) {
                 try {
                     let json = JSON.parse(loadStdout.text);
-                    if (json.active_backend) root.activeBackend = json.active_backend;
-                    if (json.active_model) root.activeModel = json.active_model;
+                    if (json.active_profile) root.activeProfileName = json.active_profile;
+                    if (json.profiles && Array.isArray(json.profiles) && json.profiles.length > 0) root.profiles = json.profiles;
+                    // Apply active profile values
+                    let p = root.activeProfile;
+                    root.activeBackend = p.backend;
+                    root.activeModel = p.model;
+                    root.systemPrompt = p.systemPrompt;
                     if (json.summarize_threshold !== undefined) root.summarizeThreshold = json.summarize_threshold;
                     if (json.keep_recent_messages !== undefined) root.keepRecentMessages = json.keep_recent_messages;
-                    if (json.system_prompt !== undefined) root.systemPrompt = json.system_prompt;
                     if (json.memory_enabled !== undefined) root.memoryEnabled = json.memory_enabled;
                     if (json.memory_split_threshold !== undefined) root.memorySplitThreshold = json.memory_split_threshold;
                     if (json.web_search_enabled !== undefined) root.webSearchEnabled = json.web_search_enabled;

@@ -15,3 +15,4 @@ ModelFetcher ModelFetcher.qml
 MemoryService MemoryService.qml
 WebSearchService WebSearchService.qml
 ShellService ShellService.qml
+ProfileSwitcher ProfileSwitcher.qml
