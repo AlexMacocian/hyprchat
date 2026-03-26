@@ -67,30 +67,20 @@ QuickShell listens for the global shortcut and toggles visibility.
 
 No `windowrulev2` entries needed in the Hyprland config.
 
-### Event Listener (socket2)
-
-HyprChat listens on Hyprland's event socket
-(`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`)
-for compositor events. This is a persistent connection maintained for
-the lifetime of the daemon.
-
-Handled events:
-
-| Event | Action |
-| ----- | ------ |
-| `configreloaded` | Re-read theme JSON, re-read HyprChat config |
-
-The event listener is generic — additional events can be handled as
-needed (e.g. `activewindowv2`, `workspace` for future features).
-
 ## Theme Integration
 
-Themed via a JSON file, similar to how VS Code loads color themes.
-HyprChat reads its theme JSON at startup and re-reads it when a
-`configreloaded` event arrives on socket2 (see
-[Event Listener](#event-listener-socket2) above).
+Themed via a JSONC file (JSON with comments) at
+`~/.config/hyprchat/theme.jsonc`. HyprChat reads it at startup and
+watches for changes via `inotifywait` — colors update live when the
+file is modified.
 
-```json
+If the file doesn't exist, HyprChat creates it with default values
+on first launch.
+
+```jsonc
+// HyprChat theme file (JSONC)
+// Edit this file to customize colors and fonts.
+// Changes are applied automatically.
 {
   "bg0": "#0F0808",
   "bg1": "#1C1210",
