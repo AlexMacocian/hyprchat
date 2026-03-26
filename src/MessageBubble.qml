@@ -71,6 +71,17 @@ Item {
             selectByMouse: true
             selectedTextColor: Theme.bg0
             selectionColor: Theme.accent2
+
+            onLinkActivated: (link) => {
+                Qt.openUrlExternally(link);
+            }
+
+            // Show pointer cursor on links
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                cursorShape: msgText.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+            }
         }
 
         // Collapse/expand button

@@ -16,7 +16,8 @@ Item {
     property int keepRecentMessages: 4
     property string systemPrompt: "You are a helpful assistant. Be concise."
     property bool memoryEnabled: true
-    property int memorySplitThreshold: 200  // lines before suggesting split
+    property int memorySplitThreshold: 200
+    property bool webSearchEnabled: true  // lines before suggesting split
 
     property bool _loaded: false
 
@@ -37,7 +38,8 @@ Item {
             keep_recent_messages: root.keepRecentMessages,
             system_prompt: root.systemPrompt,
             memory_enabled: root.memoryEnabled,
-            memory_split_threshold: root.memorySplitThreshold
+            memory_split_threshold: root.memorySplitThreshold,
+            web_search_enabled: root.webSearchEnabled
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -68,6 +70,7 @@ Item {
                     if (json.system_prompt !== undefined) root.systemPrompt = json.system_prompt;
                     if (json.memory_enabled !== undefined) root.memoryEnabled = json.memory_enabled;
                     if (json.memory_split_threshold !== undefined) root.memorySplitThreshold = json.memory_split_threshold;
+                    if (json.web_search_enabled !== undefined) root.webSearchEnabled = json.web_search_enabled;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

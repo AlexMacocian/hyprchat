@@ -34,15 +34,24 @@ Item {
         "When a topic gets a size warning after memory_append, use memory_reorganize to split it into subtopics.\n" +
         "Target 10-200 lines per topic."
 
+    property bool webSearchEnabled: false
+
     readonly property string _toolPrompt: "You have tools available. Use them when they would help answer " +
         "the user's question accurately. Don't ask permission to use tools — just use them. " +
         "If a tool call fails, report the error briefly and continue."
+
+    readonly property string _webSearchPrompt: "You can search the web using web_search and read pages using web_read_page.\n" +
+        "Use web search when the user asks about current events, recent information, or anything you're unsure about.\n" +
+        "After searching, you can read specific pages for more detail. Cite your sources with URLs."
 
     // Assembled system prompt
     readonly property string _fullSystemPrompt: {
         let prompt = systemPrompt;
         if (memoryEnabled) {
             prompt += "\n\n" + _memoryPrompt;
+        }
+        if (webSearchEnabled) {
+            prompt += "\n\n" + _webSearchPrompt;
         }
 
         return prompt;
@@ -56,6 +65,8 @@ Item {
 
     // Extra headers for Copilot internal API
     property var extraHeaders: []
+
+    signal tokenExpired()
 
     // Signals
     signal tokenReceived(string token)
@@ -226,6 +237,10 @@ Item {
             onRead: (line) => {
                 if (line.trim().length > 0) {
                     console.warn("Backend stderr:", line);
+                }
+                // Detect expired token from error response on stdout (non-SSE)
+                if (line.indexOf("expired") >= 0 || line.indexOf("unauthorized") >= 0) {
+                    root.tokenExpired();
                 }
             }
         }

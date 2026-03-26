@@ -23,6 +23,7 @@ Item {
 
     signal fetchComplete()
     signal copilotApiReady(string apiBase, string token)
+    signal tokenExpired()
 
     // Required headers for Copilot internal API
     readonly property var copilotHeaders: [
@@ -140,6 +141,15 @@ Item {
 
             let text = fetchStdout.text.trim();
             console.log("ModelFetcher: models response (", text.length, "chars):", text.substring(0, 300));
+
+            // Check for expired token
+            if (text.indexOf("expired") >= 0 || text.indexOf("unauthorized") >= 0 || text.indexOf("Incorrect API key") >= 0) {
+                console.log("ModelFetcher: token expired, requesting refresh");
+                root.tokenExpired();
+                root.fetchComplete();
+                return;
+            }
+
             try {
                 if (root.backendName === "copilot") {
                     root.parseCopilotModels(text);

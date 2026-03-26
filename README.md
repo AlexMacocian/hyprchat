@@ -41,23 +41,31 @@ visible terminal window
 
 ## Quick Start
 
+### Dependencies
+
+- [QuickShell](https://quickshell.outfoxxed.me) (0.2+)
+- Node.js (for web scraper)
+- gnome-keyring + libsecret (for secret storage)
+- openssl (for memory encryption)
+
+### Install
+
 ```bash
-# Install QuickShell first (https://quickshell.outfoxxed.me)
+# Install system dependencies (Arch/CachyOS)
+sudo pacman -S gnome-keyring libsecret nodejs npm
 
-# Install HyprChat as a QuickShell module
+# Clone and install Node dependencies
+cd src/scraper && npm install && cd ../..
+
+# Symlink for development
+ln -sf $(pwd)/src ~/.config/quickshell/hyprchat
+
+# Or copy for production
 mkdir -p ~/.config/quickshell/hyprchat
-cp -r qml/ cpp/ shell.qml ~/.config/quickshell/hyprchat/
-
-# Or symlink for development
-ln -sf $(pwd) ~/.config/quickshell/hyprchat
-
-# Build C++ plugin
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build .
+cp -r src/* ~/.config/quickshell/hyprchat/
 
 # Launch
-quickshell -m hyprchat
+quickshell -c hyprchat
 ```
 
 Add to your Hyprland config:

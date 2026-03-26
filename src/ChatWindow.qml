@@ -46,6 +46,41 @@ FloatingWindow {
         splitThreshold: prefs.memorySplitThreshold
     }
 
+    // Web search service
+    WebSearchService {
+        id: webSearch
+
+        onSearchComplete: (toolCallId, results) => {
+            window._resolveAsyncTool(toolCallId, results);
+        }
+        onPageComplete: (toolCallId, content) => {
+            window._resolveAsyncTool(toolCallId, content);
+        }
+    }
+
+    // Async tool handling — when a tool is async, we store the pending
+    // state and resume when the result arrives
+    property var _pendingToolCallMsg: null
+    property var _pendingToolResults: []
+    property int _pendingToolTotal: 0
+    property int _pendingToolDone: 0
+
+    function _resolveAsyncTool(toolCallId, result) {
+        _pendingToolResults.push({
+            role: "tool",
+            tool_call_id: toolCallId,
+            content: result
+        });
+        _pendingToolDone++;
+
+        if (_pendingToolDone >= _pendingToolTotal) {
+            // All tool results ready — continue conversation
+            backend.continueWithToolResults(_pendingToolCallMsg, _pendingToolResults);
+            _pendingToolCallMsg = null;
+            _pendingToolResults = [];
+        }
+    }
+
     // Active backend
     property string activeBackendName: prefs.activeBackend
     property string activeModel: prefs.activeModel
@@ -84,9 +119,13 @@ FloatingWindow {
         }
 
         onCopilotApiReady: (apiBase, token) => {
-            // Use the Copilot internal API for chat completions
             backend.apiUrl = apiBase + "/chat/completions";
             backend.apiKey = token;
+        }
+
+        onTokenExpired: {
+            console.log("ChatWindow: Copilot token expired, refreshing...");
+            initCopilotAuth();
         }
     }
 
@@ -429,6 +468,41 @@ FloatingWindow {
         }
     ]
 
+    readonly property var webTools: [
+        {
+            type: "function",
+            function: {
+                name: "web_search",
+                description: "Search the web using DuckDuckGo. Returns titles, URLs, and snippets for the top results.",
+                parameters: {
+                    type: "object",
+                    properties: { query: { type: "string", description: "Search query" } },
+                    required: ["query"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "web_read_page",
+                description: "Fetch and read the text content of a web page URL. Returns cleaned text, truncated to ~8000 chars.",
+                parameters: {
+                    type: "object",
+                    properties: { url: { type: "string", description: "URL to fetch" } },
+                    required: ["url"]
+                }
+            }
+        }
+    ]
+
+    // Combine active tools based on preferences
+    readonly property var activeTools: {
+        let t = [];
+        if (prefs.memoryEnabled) t = t.concat(memoryTools);
+        if (prefs.webSearchEnabled) t = t.concat(webTools);
+        return t;
+    }
+
     // Tool-use loop counter
     property int _toolLoopCount: 0
     readonly property int _maxToolLoops: 10
@@ -440,7 +514,8 @@ FloatingWindow {
         contextSummary: window._activeSummary
         systemPrompt: prefs.systemPrompt
         memoryEnabled: prefs.memoryEnabled
-        tools: prefs.memoryEnabled ? window.memoryTools : []
+        webSearchEnabled: prefs.webSearchEnabled
+        tools: window.activeTools
 
         onTokenReceived: (token) => {
             let idx = messageModel.count - 1;
@@ -467,11 +542,13 @@ FloatingWindow {
                 return;
             }
 
-            // Execute each tool call and collect results
+            // Filter out empty tool calls (streaming artifacts)
+            let validCalls = toolCalls.filter(tc => tc.name && tc.name.length > 0);
+
             let toolCallMsg = {
                 role: "assistant",
                 content: null,
-                tool_calls: toolCalls.map(tc => ({
+                tool_calls: validCalls.map(tc => ({
                     id: tc.id,
                     type: "function",
                     function: { name: tc.name, arguments: tc.arguments }
@@ -479,19 +556,50 @@ FloatingWindow {
             };
 
             let toolResults = [];
+            let asyncCount = 0;
+
             for (let i = 0; i < toolCalls.length; i++) {
                 let tc = toolCalls[i];
-                let result = window.executeMemoryTool(tc.name, tc.arguments);
-                console.log("ChatWindow: tool", tc.name, "->", result.substring(0, 100));
-                toolResults.push({
-                    role: "tool",
-                    tool_call_id: tc.id,
-                    content: result
-                });
+
+                // Skip empty tool calls (streaming accumulation artifacts)
+                if (!tc.name || tc.name.length === 0) {
+                    console.log("ChatWindow: skipping empty tool call at index", i);
+                    continue;
+                }
+
+                console.log("ChatWindow: executing tool", tc.name);
+
+                if (tc.name === "web_search" || tc.name === "web_read_page") {
+                    // Async tool — will be resolved later
+                    asyncCount++;
+                    try {
+                        let args = JSON.parse(tc.arguments);
+                        if (tc.name === "web_search") {
+                            webSearch.search(args.query, tc.id);
+                        } else {
+                            webSearch.fetchPage(args.url, tc.id);
+                        }
+                    } catch (e) {
+                        toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
+                    }
+                } else {
+                    // Sync tool (memory)
+                    let result = window.executeTool(tc.name, tc.arguments);
+                    console.log("ChatWindow: tool", tc.name, "->", result.substring(0, 100));
+                    toolResults.push({ role: "tool", tool_call_id: tc.id, content: result });
+                }
             }
 
-            // Continue the conversation with tool results
-            backend.continueWithToolResults(toolCallMsg, toolResults);
+            if (asyncCount > 0) {
+                // Store pending state — will resume when async tools complete
+                window._pendingToolCallMsg = toolCallMsg;
+                window._pendingToolResults = toolResults;
+                window._pendingToolTotal = toolResults.length + asyncCount;
+                window._pendingToolDone = toolResults.length;
+            } else {
+                // All sync — continue immediately
+                backend.continueWithToolResults(toolCallMsg, toolResults);
+            }
         }
 
         onResponseFinished: {
@@ -514,12 +622,22 @@ FloatingWindow {
                 messageModel.set(idx, { role: "assistant", text: "**Error:** " + error, sent: true });
             }
         }
+
+        onTokenExpired: {
+            console.log("ChatWindow: backend token expired, refreshing...");
+            if (window.activeBackendName === "copilot") {
+                initCopilotAuth();
+            }
+        }
     }
 
     // Execute a memory tool and return the result as a string
-    function executeMemoryTool(name, argsJson) {
+    function executeTool(name, argsJson) {
         try {
-            let args = JSON.parse(argsJson);
+            let args = {};
+            if (argsJson && argsJson.length > 0 && argsJson !== "null") {
+                try { args = JSON.parse(argsJson); } catch(e) { args = {}; }
+            }
 
             if (name === "memory_list_topics") {
                 let topics = memoryService.listTopics();

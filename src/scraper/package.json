@@ -1,0 +1,25 @@
+{
+  "name": "hyprchat",
+  "version": "1.0.0",
+  "description": "Lightweight AI chat panel for Hyprland. Quick, disposable conversations accessible from a keybind — no editor or browser required.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexMacocian/hyprchat.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/AlexMacocian/hyprchat/issues"
+  },
+  "homepage": "https://github.com/AlexMacocian/hyprchat#readme",
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12"
+  }
+}
