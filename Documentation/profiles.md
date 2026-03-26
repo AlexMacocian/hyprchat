@@ -11,7 +11,7 @@ from the top bar.
 ## What's in a Profile
 
 | Field | Description | Example |
-|-------|-------------|---------|
+| ----- | ----------- | ------- |
 | `name` | Display name | "Steve" |
 | `backend` | Which provider to use | "copilot" |
 | `model` | Which model to use | "claude-opus-4.6" |
@@ -88,6 +88,7 @@ the plain backend/model label). Clicking it opens a dropdown listing
 all profiles. Select one to switch immediately.
 
 Switching a profile:
+
 - Changes the system prompt
 - Changes the backend + model on the fly
 - Starts a new chat (clears conversation)

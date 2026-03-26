@@ -25,7 +25,7 @@ configurable threshold (default: 70% of the context window). This
 leaves room for the summarization request itself and the model's
 response.
 
-```
+```txt
 Context usage > 70%
     ↓
 Pause normal chat
@@ -56,7 +56,7 @@ flowchart TD
 The summarization is driven by a special system-level prompt sent
 to the model. This prompt instructs the model to:
 
-```
+```txt
 You are about to summarize this conversation because it is approaching
 the context limit. Before summarizing:
 
@@ -87,7 +87,7 @@ conversation naturally. The user should not notice a loss of context.
 The conversation history is replaced with:
 
 | Position | Content |
-|----------|---------|
+| -------- | ------- |
 | 1 | System prompt (unchanged) |
 | 2 | Summary message (role: `system`, contains the summary + memory refs) |
 | 3 | Last 2-4 messages from the conversation (preserves immediate context) |
@@ -99,7 +99,7 @@ leaving room for the conversation to continue.
 
 The summary contains explicit references to memory files:
 
-```
+```txt
 ## Conversation Summary
 
 We discussed setting up HyprChat, a QuickShell-based AI chat panel.

@@ -15,7 +15,7 @@ tools to the LLM via the standard MCP protocol.
 
 Memories are stored as encrypted markdown files organized by topic:
 
-```
+```txt
 ~/.config/hyprchat/memory/
 ├── general.md.enc
 ├── linux.md.enc

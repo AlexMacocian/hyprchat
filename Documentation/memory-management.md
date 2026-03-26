@@ -16,7 +16,7 @@ them, and eventually become too large to fit in a single tool result.
 Memory is organized as topic files. As a topic file grows, it should
 be split into subtopics:
 
-```
+```txt
 Before:
   linux.md  (500 lines — too large)
 
@@ -58,7 +58,7 @@ propose a split, which the user can confirm.
 When memory is organized into directories, `memory_list_topics`
 returns a tree:
 
-```
+```txt
 general
 linux/
   linux/packages

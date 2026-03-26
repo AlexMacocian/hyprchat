@@ -27,7 +27,7 @@ sudo pacman -S gnome-keyring libsecret
 Add to `/etc/pam.d/login` (and your display manager's PAM config,
 e.g. `greetd`, `sddm`):
 
-```
+```txt
 auth       optional     pam_gnome_keyring.so
 session    optional     pam_gnome_keyring.so auto_start
 ```
@@ -136,6 +136,7 @@ restarts for Copilot), allowing the user to enter different
 credentials.
 
 Use cases:
+
 - **Rotate an API key** — sign out, paste the new key
 - **Switch accounts** — sign out of one provider, sign in with
   different credentials

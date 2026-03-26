@@ -1,7 +1,7 @@
 # HyprChat
 
 Lightweight AI chat panel for Hyprland. Quick, disposable conversations
-accessible from a keybind — no editor or browser required.
+accessible from a keybind - no editor or browser required.
 
 Built with [QuickShell](https://quickshell.outfoxxed.me) (Qt6/QML) as
 a resident Hyprland shell widget.

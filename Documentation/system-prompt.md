@@ -33,7 +33,7 @@ user controls tone and personality here.
 Appended automatically when memory is enabled for the conversation.
 Tells the LLM how and when to use memory tools:
 
-```
+```txt
 You have access to a persistent memory system. Use it proactively:
 
 READING MEMORY:
@@ -65,7 +65,7 @@ conversation. The LLM never sees memory tools or instructions.
 
 Appended when any tools are available (memory, filesystem, or both):
 
-```
+```txt
 You have tools available. Use them when they would help answer the
 user's question accurately. Don't ask permission to use tools —
 just use them. If a tool call fails, report the error briefly and
@@ -79,7 +79,7 @@ automatic memory recall at conversation start (see
 [Memory Management](memory-management.md)), a summary of relevant
 memory is prepended to the conversation as context:
 
-```
+```txt
 [Recalled from memory]
 - User runs Hyprland on Arch Linux
 - Preferred editor: Neovim
@@ -116,7 +116,7 @@ The base prompt is fully user-controlled. The memory and tool
 instruction blocks are built-in but could be made configurable in
 the future if users want to override the default phrasing.
 
-The key design choice: memory instructions are **prescriptive** —
+The key design choice: memory instructions are **prescriptive**,
 they tell the LLM to use memory proactively rather than waiting
 to be asked. This ensures memory accumulates naturally over time
 without the user having to say "remember this."
