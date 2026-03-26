@@ -16,3 +16,4 @@ MemoryService MemoryService.qml
 WebSearchService WebSearchService.qml
 ShellService ShellService.qml
 ProfileSwitcher ProfileSwitcher.qml
+FileService FileService.qml

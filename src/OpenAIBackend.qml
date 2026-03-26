@@ -45,10 +45,15 @@ Item {
         "After searching, you can read specific pages for more detail. Cite your sources with URLs."
 
     property bool shellEnabled: false
+    property bool fileAccessEnabled: false
 
     readonly property string _shellPrompt: "You can execute shell commands using shell_exec (waits for output) and shell_exec_background (fire-and-forget).\n" +
         "Use shell commands when the user asks you to check system state, install packages, run scripts, build projects, or interact with the filesystem.\n" +
         "Always show the user what command you're running. Be careful with destructive commands — confirm with the user first."
+
+    readonly property string _fileAccessPrompt: "You can read and write files using fs_read_file, fs_write_file, fs_list_directory, and fs_search_files.\n" +
+        "Use these to explore project structures, read source code, create or edit files.\n" +
+        "All paths must be absolute. Be careful with writes — confirm with the user before overwriting existing files."
 
     // Assembled system prompt
     readonly property string _fullSystemPrompt: {
@@ -61,6 +66,9 @@ Item {
         }
         if (shellEnabled) {
             prompt += "\n\n" + _shellPrompt;
+        }
+        if (fileAccessEnabled) {
+            prompt += "\n\n" + _fileAccessPrompt;
         }
 
         return prompt;

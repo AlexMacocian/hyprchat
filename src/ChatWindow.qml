@@ -67,6 +67,16 @@ FloatingWindow {
         }
     }
 
+    // File service
+    FileService {
+        id: fileService
+        allowedRoot: prefs.fileAccessRoot
+
+        onOperationComplete: (toolCallId, result) => {
+            window._resolveAsyncTool(toolCallId, result);
+        }
+    }
+
     // Async tool handling — when a tool is async, we store the pending
     // state and resume when the result arrives
     property var _pendingToolCallMsg: null
@@ -537,12 +547,70 @@ FloatingWindow {
         }
     ]
 
+    readonly property var fileTools: [
+        {
+            type: "function",
+            function: {
+                name: "fs_read_file",
+                description: "Read the contents of a file. Path must be absolute.",
+                parameters: {
+                    type: "object",
+                    properties: { path: { type: "string", description: "Absolute file path" } },
+                    required: ["path"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "fs_write_file",
+                description: "Write content to a file. Creates parent directories if needed. Path must be absolute.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        path: { type: "string", description: "Absolute file path" },
+                        content: { type: "string", description: "File content to write" }
+                    },
+                    required: ["path", "content"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "fs_list_directory",
+                description: "List files and directories at a path with details (permissions, size, dates).",
+                parameters: {
+                    type: "object",
+                    properties: { path: { type: "string", description: "Absolute directory path" } },
+                    required: ["path"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "fs_search_files",
+                description: "Search for files by name pattern (glob). Excludes node_modules and .git.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        pattern: { type: "string", description: "Filename pattern (e.g. '*.qml', 'README*')" },
+                        root: { type: "string", description: "Directory to search in (optional, defaults to allowed root)" }
+                    },
+                    required: ["pattern"]
+                }
+            }
+        }
+    ]
+
     // Combine active tools based on preferences
     readonly property var activeTools: {
         let t = [];
         if (prefs.memoryEnabled) t = t.concat(memoryTools);
         if (prefs.webSearchEnabled) t = t.concat(webTools);
         if (prefs.shellEnabled) t = t.concat(shellTools);
+        if (prefs.fileAccessEnabled) t = t.concat(fileTools);
         return t;
     }
 
@@ -559,6 +627,7 @@ FloatingWindow {
         memoryEnabled: prefs.memoryEnabled
         webSearchEnabled: prefs.webSearchEnabled
         shellEnabled: prefs.shellEnabled
+        fileAccessEnabled: prefs.fileAccessEnabled
         tools: window.activeTools
 
         onTokenReceived: (token) => {
@@ -650,6 +719,24 @@ FloatingWindow {
                             shellService.exec(args.command, tc.id);
                         } else {
                             shellService.execBackground(args.command, tc.id);
+                        }
+                    } catch (e) {
+                        toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
+                    }
+                } else if (tc.name.indexOf("fs_") === 0) {
+                    // File system tools (async)
+                    asyncCount++;
+                    try {
+                        let args = {};
+                        try { args = JSON.parse(tc.arguments || "{}"); } catch(e) { args = {}; }
+                        if (tc.name === "fs_read_file") {
+                            fileService.readFile(args.path, tc.id);
+                        } else if (tc.name === "fs_write_file") {
+                            fileService.writeFile(args.path, args.content, tc.id);
+                        } else if (tc.name === "fs_list_directory") {
+                            fileService.listDirectory(args.path, tc.id);
+                        } else if (tc.name === "fs_search_files") {
+                            fileService.searchFiles(args.pattern, args.root || "", tc.id);
                         }
                     } catch (e) {
                         toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });

@@ -19,6 +19,8 @@ Item {
     property int memorySplitThreshold: 200
     property bool webSearchEnabled: true
     property bool shellEnabled: false
+    property bool fileAccessEnabled: true
+    property string fileAccessRoot: "/"
 
     // --- Profiles ---
     property string activeProfileName: "Assistant"
@@ -105,7 +107,9 @@ Item {
             memory_enabled: root.memoryEnabled,
             memory_split_threshold: root.memorySplitThreshold,
             web_search_enabled: root.webSearchEnabled,
-            shell_enabled: root.shellEnabled
+            shell_enabled: root.shellEnabled,
+            file_access_enabled: root.fileAccessEnabled,
+            file_access_root: root.fileAccessRoot
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -142,6 +146,8 @@ Item {
                     if (json.memory_split_threshold !== undefined) root.memorySplitThreshold = json.memory_split_threshold;
                     if (json.web_search_enabled !== undefined) root.webSearchEnabled = json.web_search_enabled;
                     if (json.shell_enabled !== undefined) root.shellEnabled = json.shell_enabled;
+                    if (json.file_access_enabled !== undefined) root.fileAccessEnabled = json.file_access_enabled;
+                    if (json.file_access_root !== undefined) root.fileAccessRoot = json.file_access_root;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

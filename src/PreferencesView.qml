@@ -16,6 +16,8 @@ Item {
     property bool editMemoryEnabled: true
     property bool editWebSearchEnabled: true
     property bool editShellEnabled: false
+    property bool editFileAccessEnabled: true
+    property string editFileAccessRoot: "/"
 
     // Profile editor state
     property bool editingProfile: false
@@ -39,6 +41,8 @@ Item {
             editMemoryEnabled = preferences.memoryEnabled;
             editWebSearchEnabled = preferences.webSearchEnabled;
             editShellEnabled = preferences.shellEnabled;
+            editFileAccessEnabled = preferences.fileAccessEnabled;
+            editFileAccessRoot = preferences.fileAccessRoot;
         }
     }
 
@@ -163,6 +167,8 @@ Item {
                                 root.preferences.memoryEnabled = root.editMemoryEnabled;
                                 root.preferences.webSearchEnabled = root.editWebSearchEnabled;
                                 root.preferences.shellEnabled = root.editShellEnabled;
+                                root.preferences.fileAccessEnabled = root.editFileAccessEnabled;
+                                root.preferences.fileAccessRoot = root.editFileAccessRoot;
                                 root.preferences.save();
                                 root.shown = false;
                             }
@@ -809,6 +815,110 @@ Item {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.editShellEnabled = !root.editShellEnabled
                             }
+                        }
+                    }
+
+                    // Separator
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        color: Theme.border
+                    }
+
+                    // --- File Access Toggle + Root ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "File Access"
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Allow the model to read and write files."
+                                color: Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 2
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 44
+                            Layout.preferredHeight: 24
+                            radius: 12
+                            color: root.editFileAccessEnabled ? Theme.accent1 : Theme.bg3
+
+                            Rectangle {
+                                x: root.editFileAccessEnabled ? parent.width - width - 3 : 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 18; height: 18; radius: 9
+                                color: Theme.text
+                                Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.editFileAccessEnabled = !root.editFileAccessEnabled
+                            }
+                        }
+                    }
+
+                    // File root path
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 2
+                        visible: root.editFileAccessEnabled
+
+                        Text {
+                            text: "Allowed Root Path"
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 2
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 28
+                            radius: 4
+                            color: Theme.bg2
+                            border.color: Theme.border
+                            border.width: 1
+
+                            TextEdit {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                text: root.editFileAccessRoot
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 1
+                                onTextChanged: root.editFileAccessRoot = text
+                            }
+                        }
+
+                        Text {
+                            text: "Files outside this path will be blocked. Use \"/\" for unrestricted access."
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize - 3
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
                         }
                     }
 
