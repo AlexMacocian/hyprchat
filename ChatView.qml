@@ -5,9 +5,26 @@ Item {
     id: root
 
     property alias model: messageList.model
+    property var collapsedIndices: ({})
+    property int _collapseVersion: 0
 
     function scrollToBottom() {
         messageList.positionViewAtEnd();
+    }
+
+    function isCollapsed(idx) {
+        // Reference _collapseVersion to trigger re-evaluation
+        let v = _collapseVersion;
+        return collapsedIndices[idx] === true;
+    }
+
+    function toggleCollapsed(idx) {
+        if (collapsedIndices[idx]) {
+            delete collapsedIndices[idx];
+        } else {
+            collapsedIndices[idx] = true;
+        }
+        _collapseVersion++;
     }
 
     ListView {
@@ -44,9 +61,19 @@ Item {
         delegate: MessageBubble {
             required property string role
             required property string text
+            required property int index
+            required property bool sent
             width: messageList.width
             isUser: role === "user"
+            isSystem: role === "system"
             content: text
+            sent: sent
+            collapsed: { let v = root._collapseVersion; return root.isCollapsed(index); }
+            messageIndex: index
+
+            onToggleCollapse: (idx) => {
+                root.toggleCollapsed(idx);
+            }
         }
 
         onCountChanged: {

@@ -5,16 +5,44 @@ Item {
 
     required property bool isUser
     required property string content
-
+    property int messageIndex: -1
     property bool collapsed: false
-    readonly property real collapsedHeight: Theme.fontSize * 3.5  // ~2 lines
+    property bool sent: true
+    property bool isSystem: false
+
+    signal toggleCollapse(int messageIndex)
+
+    readonly property real collapsedHeight: Theme.fontSize * 3.5
     readonly property bool canCollapse: msgText.implicitHeight > collapsedHeight + 20
 
-    implicitHeight: bubble.height + 8
+    implicitHeight: root.isSystem ? divider.height + 8 : bubble.height + 8
     height: implicitHeight
+    opacity: root.sent ? 1.0 : 0.4
+
+    // System divider (summary separator)
+    Rectangle {
+        id: divider
+        visible: root.isSystem
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: 12
+        height: visible ? dividerText.implicitHeight + 12 : 0
+        color: "transparent"
+
+        Text {
+            id: dividerText
+            anchors.centerIn: parent
+            text: root.content
+            color: Theme.textDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 2
+            font.italic: true
+        }
+    }
 
     Rectangle {
         id: bubble
+        visible: !root.isSystem
 
         anchors.right: root.isUser ? parent.right : undefined
         anchors.left: root.isUser ? undefined : parent.left
@@ -61,7 +89,7 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.collapsed = !root.collapsed
+                onClicked: root.toggleCollapse(root.messageIndex)
             }
         }
     }

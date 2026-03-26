@@ -12,6 +12,9 @@ Item {
     property string model: "gpt-4o"
     property string systemPrompt: "You are a helpful assistant. Be concise."
 
+    // Context management — if set, injected after system prompt
+    property string contextSummary: ""
+
     // Extra headers for Copilot internal API
     property var extraHeaders: []
 
@@ -36,11 +39,18 @@ Item {
         _accumulatedResponse = "";
 
         // Build the messages array with system prompt prepended
-        // Exclude the last message if it's the placeholder "..."
         let apiMessages = [{ role: "system", content: systemPrompt }];
+
+        // If we have a summary, inject it as context
+        if (contextSummary.length > 0) {
+            apiMessages.push({ role: "system", content: "Previous conversation summary:\n" + contextSummary });
+        }
+
+        // Only send messages marked as sent
         for (let i = 0; i < messages.count; i++) {
             let msg = messages.get(i);
-            if (msg.text === "...") continue;
+            if (msg.text === "..." || msg.role === "system") continue;
+            if (msg.sent === false) continue;
             apiMessages.push({ role: msg.role, content: msg.text });
         }
 

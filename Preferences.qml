@@ -12,6 +12,7 @@ Item {
 
     property string activeBackend: "copilot"
     property string activeModel: "gpt-4o"
+    property real summarizeThreshold: 0.7
 
     property bool _loaded: false
 
@@ -27,7 +28,8 @@ Item {
     function save() {
         let data = JSON.stringify({
             active_backend: root.activeBackend,
-            active_model: root.activeModel
+            active_model: root.activeModel,
+            summarize_threshold: root.summarizeThreshold
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -53,6 +55,7 @@ Item {
                     let json = JSON.parse(loadStdout.text);
                     if (json.active_backend) root.activeBackend = json.active_backend;
                     if (json.active_model) root.activeModel = json.active_model;
+                    if (json.summarize_threshold !== undefined) root.summarizeThreshold = json.summarize_threshold;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

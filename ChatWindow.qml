@@ -56,6 +56,10 @@ FloatingWindow {
     }
     property int displayTokens: actualPromptTokens >= 0 ? actualPromptTokens : estimatedTokens
     property real contextUsage: maxContextTokens > 0 ? Math.min(displayTokens / maxContextTokens, 1.0) : 0
+    property bool _summarizing: false
+    readonly property real summarizeThreshold: prefs.summarizeThreshold
+    readonly property int keepRecentMessages: 4
+    property string _activeSummary: ""
 
     // Preferences (persisted to file)
     Preferences {
@@ -231,11 +235,122 @@ FloatingWindow {
         ghLoginFlow.start();
     }
 
+    // --- Context Summarization ---
+    // TODO: When Memory MCP is available, the summarization prompt should
+    // instruct the model to save key facts to memory before summarizing,
+    // and include memory file references in the summary.
+
+    readonly property string summarizePrompt: "You are summarizing this conversation because it is approaching the context limit. " +
+        "Write a concise summary that includes: what topics were discussed, key decisions or conclusions, " +
+        "and the current state of any ongoing tasks. Be thorough but compact. " +
+        "The user should be able to continue the conversation naturally after this summary."
+
+    function performSummarization() {
+        if (_summarizing || messageModel.count < 4) return;
+        _summarizing = true;
+        console.log("ChatWindow: starting summarization, usage:", (contextUsage * 100).toFixed(1) + "%");
+
+        // Build messages for the summarization request
+        let msgs = [{ role: "system", content: summarizePrompt }];
+        for (let i = 0; i < messageModel.count; i++) {
+            let msg = messageModel.get(i);
+            if (msg.text === "...") continue;
+            msgs.push({ role: msg.role, content: msg.text });
+        }
+        msgs.push({ role: "user", content: "Please summarize this conversation now." });
+
+        let body = JSON.stringify({
+            model: activeModel,
+            messages: msgs,
+            stream: false
+        });
+
+        // Write body to temp file and call curl
+        summaryWriteProcess.command = ["bash", "-c", "cat > /tmp/hyprchat-summary.json"];
+        summaryWriteProcess.stdinEnabled = true;
+        window._summaryBody = body;
+        summaryWriteProcess.running = true;
+    }
+
+    property string _summaryBody: ""
+
+    Process {
+        id: summaryWriteProcess
+        running: false
+
+        onStarted: {
+            summaryWriteProcess.write(window._summaryBody);
+            summaryWriteProcess.stdinEnabled = false;
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            summaryCurlProcess.command = [
+                "curl", "-s",
+                backend.apiUrl,
+                "-H", "Content-Type: application/json",
+                "-H", "Authorization: Bearer " + backend.apiKey,
+                "-d", "@/tmp/hyprchat-summary.json"
+            ].concat(backend.extraHeaders);
+            summaryCurlProcess.running = true;
+        }
+    }
+
+    Process {
+        id: summaryCurlProcess
+        running: false
+
+        stdout: StdioCollector {
+            id: summaryStdout
+            waitForEnd: true
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            window._summarizing = false;
+
+            if (exitCode !== 0) {
+                console.warn("ChatWindow: summarization request failed");
+                return;
+            }
+
+            try {
+                let json = JSON.parse(summaryStdout.text);
+                let summary = "";
+                if (json.choices && json.choices[0] && json.choices[0].message) {
+                    summary = json.choices[0].message.content;
+                }
+
+                if (summary.length === 0) {
+                    console.warn("ChatWindow: empty summary response");
+                    return;
+                }
+
+                console.log("ChatWindow: summarization complete,", summary.length, "chars");
+
+                // Store the summary — will be injected as system context
+                window._activeSummary = summary;
+
+                // Mark old messages as not sent, keep last N as sent
+                let boundary = Math.max(0, messageModel.count - window.keepRecentMessages);
+                for (let i = 0; i < boundary; i++) {
+                    messageModel.setProperty(i, "sent", false);
+                }
+
+                // Insert a visual divider
+                messageModel.insert(boundary, { role: "system", text: "--- Messages above have been summarized ---", sent: false });
+
+                window.actualPromptTokens = -1; // reset to heuristic
+            } catch (e) {
+                console.warn("ChatWindow: summarization parse error:", e);
+            }
+        }
+    }
+
     // LLM backend
     OpenAIBackend {
         id: backend
         model: window.activeModel
         apiUrl: window.backendUrls[window.activeBackendName] || "https://api.openai.com/v1/chat/completions"
+        contextSummary: window._activeSummary
 
         onTokenReceived: (token) => {
             // Update the last assistant message in-place
@@ -251,7 +366,10 @@ FloatingWindow {
         }
 
         onResponseFinished: {
-            // Done streaming
+            // Check if we need to summarize
+            if (!window._summarizing && window.contextUsage >= window.summarizeThreshold) {
+                window.performSummarization();
+            }
         }
 
         onUsageReceived: (promptTokens, completionTokens, totalTokens) => {
@@ -327,7 +445,7 @@ FloatingWindow {
                             id: newChatMouse
                             anchors.fill: parent
                             hoverEnabled: true
-                            onClicked: { messageModel.clear(); window.actualPromptTokens = -1; }
+                            onClicked: { messageModel.clear(); window.actualPromptTokens = -1; window._activeSummary = ""; }
                         }
                     }
 
@@ -486,6 +604,7 @@ FloatingWindow {
 
                 // Background track
                 Rectangle {
+                    id: gaugeTrack
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
@@ -503,6 +622,16 @@ FloatingWindow {
                         Behavior on width {
                             NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
                         }
+                    }
+
+                    // Threshold marker
+                    Rectangle {
+                        x: gaugeTrack.width * window.summarizeThreshold - 1
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 7
+                        radius: 1
+                        color: Theme.textDim
                     }
                 }
 
@@ -530,6 +659,12 @@ FloatingWindow {
                 Layout.minimumHeight: 48
                 Layout.preferredHeight: implicitHeight
                 Layout.bottomMargin: 4
+                enabled: !backend.streaming && !window._summarizing
+                streaming: backend.streaming
+
+                onStopRequested: {
+                    backend.cancel();
+                }
 
                 onMessageSent: (text) => {
                     if (backend.apiKey.length === 0) {
@@ -538,8 +673,8 @@ FloatingWindow {
                         apiKeyPrompt.focusInput();
                         return;
                     }
-                    messageModel.append({ role: "user", text: text });
-                    messageModel.append({ role: "assistant", text: "..." });
+                    messageModel.append({ role: "user", text: text, sent: true });
+                    messageModel.append({ role: "assistant", text: "...", sent: true });
                     backend.send(messageModel);
                 }
             }
@@ -555,6 +690,6 @@ FloatingWindow {
     // Ctrl+N for new chat
     Shortcut {
         sequence: "Ctrl+N"
-        onActivated: { messageModel.clear(); window.actualPromptTokens = -1; }
+        onActivated: { messageModel.clear(); window.actualPromptTokens = -1; window._activeSummary = ""; }
     }
 }

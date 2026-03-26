@@ -29,6 +29,8 @@ memory instructions, tool guidance
 per-conversation toggle
 - [Memory Management](Documentation/memory-management.md) - segmentation,
 growth control, token budgets
+- [Context Management](Documentation/context-management.md) - memory-aware
+summarization, context window strategy
 - [MCP Support](Documentation/mcp.md) - MCP architecture,
 transport, tool execution flow
 - [File System MCP](Documentation/mcp-filesystem.md) - read-only file access server
