@@ -14,13 +14,25 @@ Item {
     property bool memoryEnabled: false
 
     // Static prompts appended to the system prompt
-    readonly property string _memoryPrompt: "You have access to a persistent memory system. Use it proactively:\n" +
-        "READING: At the start of conversations, check relevant memory topics for context. " +
-        "Use memory_list_topics to see what's available, then memory_read for relevant topics.\n" +
-        "WRITING: When you learn something new about the user (preferences, patterns, environment, projects), " +
-        "save it immediately using memory_append. When the user corrects you, update memory. " +
-        "When you discover a useful fact (a working command, a solution), save it.\n" +
-        "Be selective — save facts and preferences, not conversation transcripts. Use concise bullet points."
+    readonly property string _memoryPrompt:
+        "IMPORTANT: You have a persistent memory system. You MUST use it. Follow these rules strictly:\n\n" +
+        "STEP 1 — ALWAYS READ MEMORY FIRST:\n" +
+        "Before responding to the user's FIRST message in a conversation, you MUST:\n" +
+        "1. Call memory_list_topics to see all available topics\n" +
+        "2. Call memory_read on any topic that seems relevant to the user's message\n" +
+        "Do this EVERY conversation. Do not skip this step. Do not say 'I don't have memory' — you do.\n\n" +
+        "STEP 2 — ALWAYS SAVE NEW INFORMATION:\n" +
+        "After EVERY response where you learned something new, call memory_append to save it. Examples:\n" +
+        "- User tells you their name, preferences, or environment → save to 'user' topic\n" +
+        "- You solve a problem together → save the solution to a relevant topic\n" +
+        "- User corrects you → update the relevant memory topic\n" +
+        "- You learn about a project → save to a project-specific topic\n" +
+        "Use concise bullet points. Do NOT save conversation transcripts.\n\n" +
+        "STEP 3 — ORGANIZE MEMORY:\n" +
+        "Use broad topic names: 'user', 'linux', 'projects' — NOT 'user_birthday' or 'user_name'.\n" +
+        "Group related facts under one topic. If you see scattered small topics, consolidate them.\n" +
+        "When a topic gets a size warning after memory_append, use memory_reorganize to split it into subtopics.\n" +
+        "Target 10-200 lines per topic."
 
     readonly property string _toolPrompt: "You have tools available. Use them when they would help answer " +
         "the user's question accurately. Don't ask permission to use tools — just use them. " +
@@ -32,7 +44,7 @@ Item {
         if (memoryEnabled) {
             prompt += "\n\n" + _memoryPrompt;
         }
-        // TODO: add _toolPrompt when MCP tools are wired up
+
         return prompt;
     }
 

@@ -16,6 +16,7 @@ Item {
     property int keepRecentMessages: 4
     property string systemPrompt: "You are a helpful assistant. Be concise."
     property bool memoryEnabled: true
+    property int memorySplitThreshold: 200  // lines before suggesting split
 
     property bool _loaded: false
 
@@ -35,7 +36,8 @@ Item {
             summarize_threshold: root.summarizeThreshold,
             keep_recent_messages: root.keepRecentMessages,
             system_prompt: root.systemPrompt,
-            memory_enabled: root.memoryEnabled
+            memory_enabled: root.memoryEnabled,
+            memory_split_threshold: root.memorySplitThreshold
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -65,6 +67,7 @@ Item {
                     if (json.keep_recent_messages !== undefined) root.keepRecentMessages = json.keep_recent_messages;
                     if (json.system_prompt !== undefined) root.systemPrompt = json.system_prompt;
                     if (json.memory_enabled !== undefined) root.memoryEnabled = json.memory_enabled;
+                    if (json.memory_split_threshold !== undefined) root.memorySplitThreshold = json.memory_split_threshold;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

@@ -11,12 +11,14 @@ Item {
     readonly property string memoryDir: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/hyprchat/memory"
     property string _encryptionKey: ""
     property bool ready: _encryptionKey.length > 0 && _cacheLoaded
+    property int splitThreshold: 200  // lines before suggesting split
 
     // In-memory cache: { "topic_name": "markdown content", ... }
+    // Nested topics use "/" separator: "linux/hyprland"
     property var cache: ({})
     property var topicNames: []
     property bool _cacheLoaded: false
-    property int _cacheVersion: 0  // bump to trigger UI reactivity
+    property int _cacheVersion: 0
 
     signal cacheReady()
     signal topicChanged(string topic)
@@ -91,15 +93,23 @@ Item {
 
     // --- Load All Topics at Startup ---
     function _loadAllTopics() {
+        console.log("MemoryService: loading topics, key length:", _encryptionKey.length, "dir:", memoryDir);
+        // Find all .md.enc files including subdirectories
         loadAllProcess.command = [
             "bash", "-c",
-            "for f in '" + memoryDir + "'/*.md.enc 2>/dev/null; do " +
-            "  [ -f \"$f\" ] || continue; " +
-            "  topic=$(basename \"$f\" .md.enc); " +
+            "find '" + memoryDir + "' -name '*.md.enc' 2>/dev/null | while read f; do " +
+            "  topic=$(realpath --relative-to='" + memoryDir + "' \"$f\" | sed 's/\\.md\\.enc$//'); " +
             "  echo \"__TOPIC__:$topic\"; " +
-            "  header=$(head -c 24 \"$f\"); " +
-            "  if [ \"$header\" = 'HYPRCHAT:v1:aes-256-cbc' ]; then " +
-            "    tail -c +26 \"$f\" | openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:" + _encryptionKey + " 2>/dev/null; " +
+            "  header=$(head -1 \"$f\"); " +
+            "  if echo \"$header\" | grep -q '^HYPRCHAT:'; then " +
+            "    algo=$(echo \"$header\" | cut -d: -f3); " +
+            "    headerlen=$(echo -n \"$header\" | wc -c); " +
+            "    headerlen=$((headerlen + 1)); " +
+            "    if [ \"$algo\" = 'aes-256-cbc' ]; then " +
+            "      tail -c +$((headerlen + 1)) \"$f\" | openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:" + _encryptionKey + " 2>/dev/null; " +
+            "    else " +
+            "      echo '[unsupported encryption: '$algo']'; " +
+            "    fi; " +
             "  else " +
             "    openssl enc -d -aes-256-cbc -pbkdf2 -in \"$f\" -pass pass:" + _encryptionKey + " 2>/dev/null; " +
             "  fi; " +
@@ -116,6 +126,7 @@ Item {
 
         onExited: (exitCode, exitStatus) => {
             let text = loadAllStdout.text;
+            console.log("MemoryService: load exited code:", exitCode, "output length:", text.length, "first 200:", text.substring(0, 200));
             let newCache = {};
             let names = [];
 
@@ -133,7 +144,7 @@ Item {
 
                     let endIdx = content.lastIndexOf("__END__");
                     if (endIdx >= 0) {
-                        content = content.substring(0, endIdx).trimEnd();
+                        content = content.substring(0, endIdx).replace(/\s+$/, "");
                     }
 
                     newCache[topic] = content;
@@ -162,7 +173,7 @@ Item {
     }
 
     function appendTopic(topic, content) {
-        if (!_isValidTopic(topic)) { root.error("Invalid topic name"); return; }
+        if (!_isValidTopic(topic)) { root.error("Invalid topic name"); return ""; }
 
         let existing = cache[topic] || "";
         let separator = existing.length > 0 ? "\n\n" : "";
@@ -177,6 +188,13 @@ Item {
         _cacheVersion++;
         _persistTopic(topic);
         root.topicChanged(topic);
+
+        // Return hint if file is getting large
+        let lines = cache[topic].split("\n").length;
+        if (lines > splitThreshold) {
+            return "Appended to '" + topic + "'. WARNING: " + topic + " is now " + lines + " lines (threshold: " + splitThreshold + "). Consider using memory_reorganize to split it into subtopics.";
+        }
+        return "Appended to '" + topic + "'.";
     }
 
     function editTopic(topic, content) {
@@ -206,6 +224,55 @@ Item {
         deleteFileProcess.running = true;
 
         root.topicDeleted(topic);
+    }
+
+    // Reorganize: split a topic into subtopics
+    // subtopics is an array of { name: "subtopic_name", content: "markdown" }
+    function reorganizeTopic(sourceTopic, subtopics) {
+        if (!_isValidTopic(sourceTopic)) { root.error("Invalid topic name"); return "Error: invalid topic"; }
+
+        // Create each subtopic as sourceTopic/subtopicName
+        for (let i = 0; i < subtopics.length; i++) {
+            let st = subtopics[i];
+            let fullName = sourceTopic + "/" + st.name;
+            if (!_isValidTopic(st.name)) { continue; }
+
+            cache[fullName] = st.content;
+
+            if (topicNames.indexOf(fullName) < 0) {
+                let names = topicNames.slice();
+                names.push(fullName);
+                topicNames = names;
+            }
+
+            // Ensure subdirectory exists and persist
+            _ensureDir(sourceTopic);
+            _persistTopic(fullName);
+        }
+
+        // Delete the original topic
+        delete cache[sourceTopic];
+        topicNames = topicNames.filter(n => n !== sourceTopic);
+
+        deleteFileProcess.command = ["rm", "-f", memoryDir + "/" + sourceTopic + ".md.enc"];
+        deleteFileProcess.running = true;
+
+        topicNames = topicNames.sort();
+        _cacheVersion++;
+        root.topicChanged(sourceTopic);
+
+        return "Reorganized '" + sourceTopic + "' into " + subtopics.length + " subtopics: " + subtopics.map(s => sourceTopic + "/" + s.name).join(", ");
+    }
+
+    // Ensure subdirectory exists for nested topics
+    function _ensureDir(subdir) {
+        ensureSubdirProcess.command = ["mkdir", "-p", memoryDir + "/" + subdir];
+        ensureSubdirProcess.running = true;
+    }
+
+    Process {
+        id: ensureSubdirProcess
+        running: false
     }
 
     function search(query) {
@@ -239,10 +306,13 @@ Item {
         let topic = _writeQueue.shift();
         let content = cache[topic] || "";
         let file = memoryDir + "/" + topic + ".md.enc";
+        // Ensure parent directory exists for nested topics
+        let dir = file.substring(0, file.lastIndexOf("/"));
 
         // Write with header: HYPRCHAT:v1:aes-256-cbc\n then encrypted data
         persistProcess.command = [
             "bash", "-c",
+            "mkdir -p '" + dir + "' && " +
             "cat > /tmp/hyprchat-mem-plain.md && " +
             "printf 'HYPRCHAT:v1:aes-256-cbc\n' > '" + file + "' && " +
             "openssl enc -aes-256-cbc -pbkdf2 -in /tmp/hyprchat-mem-plain.md -pass pass:" + _encryptionKey + " >> '" + file + "' && " +
@@ -279,6 +349,10 @@ Item {
 
     // --- Validation ---
     function _isValidTopic(name) {
-        return /^[a-zA-Z0-9_-]+$/.test(name);
+        // Allow alphanumeric, hyphens, underscores, and / for nesting
+        if (!name || name.length === 0) return false;
+        if (name.indexOf("..") >= 0) return false;
+        if (name.startsWith("/") || name.endsWith("/")) return false;
+        return /^[a-zA-Z0-9_\/-]+$/.test(name);
     }
 }

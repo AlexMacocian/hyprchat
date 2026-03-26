@@ -43,6 +43,7 @@ FloatingWindow {
     // Memory service
     MemoryService {
         id: memoryService
+        splitThreshold: prefs.memorySplitThreshold
     }
 
     // Active backend
@@ -399,6 +400,32 @@ FloatingWindow {
                     required: ["query"]
                 }
             }
+        },
+        {
+            type: "function",
+            function: {
+                name: "memory_reorganize",
+                description: "Split a large memory topic into smaller subtopics. Use when a topic exceeds the size threshold. The original topic is deleted and replaced with subtopics under a directory.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        source_topic: { type: "string", description: "The topic to split" },
+                        subtopics: {
+                            type: "array",
+                            description: "Array of new subtopics to create",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    name: { type: "string", description: "Subtopic name (will be created as source_topic/name)" },
+                                    content: { type: "string", description: "Markdown content for this subtopic" }
+                                },
+                                required: ["name", "content"]
+                            }
+                        }
+                    },
+                    required: ["source_topic", "subtopics"]
+                }
+            }
         }
     ]
 
@@ -507,8 +534,7 @@ FloatingWindow {
             }
 
             if (name === "memory_append") {
-                memoryService.appendTopic(args.topic, args.content);
-                return "Appended to topic '" + args.topic + "'.";
+                return memoryService.appendTopic(args.topic, args.content);
             }
 
             if (name === "memory_search") {
@@ -519,6 +545,13 @@ FloatingWindow {
                     out += "### " + results[i].topic + "\n" + results[i].matches + "\n\n";
                 }
                 return out.trim();
+            }
+
+            if (name === "memory_reorganize") {
+                if (!args.source_topic || !args.subtopics || !Array.isArray(args.subtopics)) {
+                    return "Error: memory_reorganize requires source_topic and subtopics array";
+                }
+                return memoryService.reorganizeTopic(args.source_topic, args.subtopics);
             }
 
             return "Unknown tool: " + name;
