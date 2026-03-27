@@ -23,7 +23,7 @@ sha256sums=('{{SHA256}}')
 
 build() {
     cd "${srcdir}/${pkgname}-${pkgver}/src/hyprchat-backend"
-    dotnet publish -c Release --no-self-contained=false
+    dotnet publish -c Release
 }
 
 package() {
