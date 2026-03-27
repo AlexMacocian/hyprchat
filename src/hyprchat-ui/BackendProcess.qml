@@ -38,8 +38,11 @@ Item {
     property bool streaming: false
     property string apiKey: ""
     property string apiUrl: ""
+    property string copilotApiBase: ""
     property var extraHeaders: []
     property int _nextId: 1
+    property var cachedModels: []  // last fetched models
+    property string cachedModelsBackend: ""  // backend the cached models are for
 
     // Pending RPC calls: { id: { resolve, reject } }
     property var _pending: ({})
@@ -234,9 +237,13 @@ Item {
         _send("models/fetch", {
             backend: backend,
             apiKey: apiKey,
-            apiUrl: apiUrl || ""
+            apiUrl: apiUrl || "",
+            copilotApiBase: root.copilotApiBase
         }, function(result) {
-            root.modelsFetched(result.models || []);
+            let models = result.models || [];
+            root.cachedModels = models;
+            root.cachedModelsBackend = backend;
+            root.modelsFetched(models);
         });
     }
 

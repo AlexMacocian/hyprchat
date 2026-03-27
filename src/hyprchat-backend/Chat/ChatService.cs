@@ -79,8 +79,10 @@ public sealed class ChatService
             {
                 ct.ThrowIfCancellationRequested();
 
+                Console.Error.WriteLine($"ChatService: streaming completion, {messages.Count} messages, loop {loopCount}");
                 var (content, toolCalls, usage) = await StreamCompletionAsync(
                     p.ApiUrl, p.ApiKey, p.Model, messages, toolDefs, p.ExtraHeaders, ct);
+                Console.Error.WriteLine($"ChatService: stream done, content={content.Length} chars, toolCalls={toolCalls.Count}");
 
                 // Report usage
                 if (usage is not null)
@@ -112,12 +114,23 @@ public sealed class ChatService
                 }
 
                 // Execute tools
+                // Filter out incomplete tool calls (streaming artifacts)
+                var validToolCalls = toolCalls
+                    .Where(tc => !string.IsNullOrEmpty(tc.Id) && !string.IsNullOrEmpty(tc.Name))
+                    .ToList();
+
+                if (validToolCalls.Count == 0)
+                {
+                    _transport.SendSignal("chat/finished");
+                    return;
+                }
+
                 // Add assistant message with tool_calls
                 messages.Add(new ChatMessage
                 {
                     Role = "assistant",
                     Content = string.IsNullOrEmpty(content) ? null : content,
-                    ToolCalls = toolCalls.Select(tc => new ToolCallMessage
+                    ToolCalls = validToolCalls.Select(tc => new ToolCallMessage
                     {
                         Id = tc.Id,
                         Type = "function",
@@ -130,9 +143,8 @@ public sealed class ChatService
                 });
 
                 // Execute each tool and collect results
-                foreach (var tc in toolCalls)
+                foreach (var tc in validToolCalls)
                 {
-                    if (string.IsNullOrEmpty(tc.Name)) continue;
 
                     // Notify UI about tool execution
                     _transport.SendNotification("chat/toolCall", new ToolCallNotification
@@ -157,6 +169,8 @@ public sealed class ChatService
                         Content = result
                     });
                 }
+
+                Console.Error.WriteLine($"ChatService: tool loop iteration {loopCount}, {toolCalls.Count} tools executed, sending {messages.Count} messages back to LLM");
             }
         }
         catch (OperationCanceledException)
@@ -195,6 +209,9 @@ public sealed class ChatService
         using var request = new HttpRequestMessage(HttpMethod.Post, apiUrl);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        // Force Connection: close so the SSE connection is fully closed after we're done
+        // This prevents the connection pool from trying to reuse a half-drained SSE stream
+        request.Headers.ConnectionClose = true;
 
         // Add extra headers (each element is "Key: Value")
         foreach (var header in extraHeaders)
@@ -208,11 +225,14 @@ public sealed class ChatService
             }
         }
 
+        Console.Error.WriteLine($"ChatService: sending HTTP request to {apiUrl}");
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        Console.Error.WriteLine($"ChatService: got HTTP {(int)response.StatusCode}");
 
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
+            Console.Error.WriteLine($"ChatService: error body: {errorBody[..Math.Min(errorBody.Length, 500)]}");
             if (errorBody.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
                 errorBody.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
             {
@@ -281,6 +301,8 @@ public sealed class ChatService
                 // Malformed chunk — skip
             }
         }
+
+        Console.Error.WriteLine($"ChatService: stream done, content={accumulatedContent.Length} chars, toolCalls={toolCalls.Count}");
 
         return (accumulatedContent.ToString(), toolCalls, usage);
     }

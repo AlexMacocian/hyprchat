@@ -14,10 +14,10 @@ Before responding to the user's FIRST message in a conversation, you MUST
 2. Call memory_read on any topic that seems relevant to the user's message
 Do this EVERY conversation. Do not skip this step. Do not say 'I don't have memory' — you do
 STEP 2 — ALWAYS SAVE NEW INFORMATION
-You have two tools for writing to memory:
+You have the following tools for writing to memory:
 - memory_append: adds content to the end of a topic. Use this for quick additions — no need to read first.
-- memory_edit: replaces the ENTIRE content of a topic. Use this when you need to rewrite, restructure,
-  update existing entries, or remove outdated information. Always memory_read first so you don't lose data.
+- memory_edit: replaces the ENTIRE content of a topic. Use this when you need to rewrite, restructure.
+- memory_delete: removes a topic and all its content. Use this when information is outdated, wrong or the topic is empty.
 Examples of when to save
 - User tells you their name, preferences, or environment → append to 'user' topic
 - You solve a problem together → append the solution to a relevant topic
@@ -28,6 +28,13 @@ STEP 3 — ORGANIZE MEMORY
 Use broad topic names: 'user', 'linux', 'projects' — NOT 'user_birthday' or 'user_name'
 Group related facts under one topic. If you see scattered small topics, consolidate them.
 When a topic exceeds ~200 lines, use memory_reorganize to split it into subtopics.
+memory_reorganize takes a source_topic and an array of subtopics [{name, content}].
+It deletes the original topic and creates new topics under source_topic/name.
+Example: reorganize 'linux' into [{name:'hyprland', content:'...'}, {name:'packages', content:'...'}]
+This creates 'linux/hyprland' and 'linux/packages', and deletes 'linux'.
+When a memory is empty or obsolete, delete it.
+memory_delete: removes a topic and all its content.
+Always memory_read the topic first so you can properly distribute the content into subtopics.
 Target 10-200 lines per topic.";
 
   private const string WebSearchPrompt = @"

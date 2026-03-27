@@ -7,7 +7,8 @@ Item {
 
     property bool shown: false
     property var preferences: null
-    property var modelFetcher: null  // set from ChatWindow
+    property var modelFetcher: null  // deprecated, unused
+    property var backendProcess: null  // set from ChatWindow
 
     // Local copies for editing (not applied until Save)
     property real editThreshold: 0.7
@@ -49,7 +50,7 @@ Item {
     }
 
     onEditProfileBackendChanged: {
-        if (editingProfile && modelFetcher) {
+        if (editingProfile && backendProcess) {
             _fetchModelsForBackend(editProfileBackend);
         }
         _autoSaveProfile();
@@ -95,19 +96,27 @@ Item {
     }
 
     function _fetchModelsForBackend(backend) {
-        if (!modelFetcher) return;
+        if (!backendProcess) { console.log("PreferencesView: no backendProcess"); return; }
+        // Use cached models if available for this backend
+        if (backendProcess.cachedModelsBackend === backend && backendProcess.cachedModels.length > 0) {
+            console.log("PreferencesView: using cached models for", backend, "count:", backendProcess.cachedModels.length);
+            editProfileModels = backendProcess.cachedModels;
+            editProfileModelLoading = false;
+            return;
+        }
+        console.log("PreferencesView: fetching models for", backend);
         editProfileModelLoading = true;
         editProfileModels = [];
-        modelFetcher.backendName = backend;
-        modelFetcher.fetch();
+        backendProcess.fetchModels(backend, backendProcess.apiKey, "");
     }
 
     // Listen for model fetcher completion
     Connections {
-        target: root.modelFetcher
-        function onFetchComplete() {
+        target: root.backendProcess
+        function onModelsFetched(models) {
+            console.log("PreferencesView: got", models.length, "models, editing:", root.editingProfile);
             if (root.editingProfile) {
-                root.editProfileModels = root.modelFetcher.models;
+                root.editProfileModels = models;
                 root.editProfileModelLoading = false;
             }
         }
@@ -516,46 +525,43 @@ Item {
                                     }
                                 }
 
-                                // Scrollable model list
-                                Flickable {
+                                // Model list
+                                ListView {
+                                    id: modelListView
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: Math.min(modelListCol.implicitHeight, 120)
-                                    contentHeight: modelListCol.implicitHeight
+                                    Layout.preferredHeight: Math.min(count * 27, 150)
+                                    visible: count > 0
                                     clip: true
+                                    interactive: false
+                                    spacing: 1
+                                    model: root.editProfileModels
                                     boundsBehavior: Flickable.StopAtBounds
-                                    visible: root.editProfileModels.length > 0
 
-                                    Column {
-                                        id: modelListCol
-                                        width: parent.width
-                                        spacing: 1
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        required property int index
+                                        width: modelListView.width
+                                        height: 26
+                                        radius: 3
+                                        color: modelData.id === root.editProfileModel ? Theme.accent1 : (mdlMouse.containsMouse ? Theme.bg3 : "transparent")
 
-                                        Repeater {
-                                            model: root.editProfileModels
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 8
+                                            text: modelData.name || modelData.id
+                                            color: modelData.id === root.editProfileModel ? Theme.bg0 : Theme.text
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSize - 2
+                                            font.bold: modelData.id === root.editProfileModel
+                                        }
 
-                                            Rectangle {
-                                                width: parent ? parent.width : 0
-                                                height: 26
-                                                radius: 3
-                                                color: modelData.id === root.editProfileModel ? Theme.accent1 : (mdlMouse.containsMouse ? Theme.bg3 : "transparent")
-
-                                                Text {
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 8
-                                                    text: modelData.name || modelData.id
-                                                    color: modelData.id === root.editProfileModel ? Theme.bg0 : Theme.text
-                                                    font.family: Theme.fontFamily
-                                                    font.pixelSize: Theme.fontSize - 2
-                                                    font.bold: modelData.id === root.editProfileModel
-                                                }
-
-                                                MouseArea {
-                                                    id: mdlMouse
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    onClicked: root.editProfileModel = modelData.id
-                                                }
+                                        MouseArea {
+                                            id: mdlMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                root.editProfileModel = modelData.id;
                                             }
                                         }
                                     }

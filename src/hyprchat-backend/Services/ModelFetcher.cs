@@ -33,7 +33,7 @@ public sealed class ModelFetcher
         {
             return p.Backend switch
             {
-                "copilot" => await FetchCopilotAsync(p.ApiKey, ct),
+                "copilot" => await FetchCopilotAsync(p.ApiKey, p.CopilotApiBase, ct),
                 "ollama" => await FetchOllamaAsync(p.ApiUrl, ct),
                 "openai" => await FetchOpenAiAsync(p.ApiKey, ct),
                 _ => new ModelListResult()
@@ -46,41 +46,52 @@ public sealed class ModelFetcher
         }
     }
 
-    private async Task<ModelListResult> FetchCopilotAsync(string oauthToken, CancellationToken ct)
+    private async Task<ModelListResult> FetchCopilotAsync(string apiKeyOrOauth, string copilotApiBase, CancellationToken ct)
     {
-        // Step 1: Exchange OAuth token for Copilot session token
-        using var tokenReq = new HttpRequestMessage(HttpMethod.Get,
-            "https://api.github.com/copilot_internal/v2/token");
-        tokenReq.Headers.TryAddWithoutValidation("Authorization", $"token {oauthToken}");
-        tokenReq.Headers.TryAddWithoutValidation("Accept", "application/json");
+        string sessionToken;
+        string apiBase;
 
-        using var tokenResp = await _http.SendAsync(tokenReq, ct);
-        if (!tokenResp.IsSuccessStatusCode)
+        if (!string.IsNullOrEmpty(copilotApiBase))
         {
-            var body = await tokenResp.Content.ReadAsStringAsync(ct);
-            if (body.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
-                body.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
-            {
-                _transport.SendSignal("models/tokenExpired");
-            }
-            return new ModelListResult();
+            // Already have session token + API base — skip exchange
+            sessionToken = apiKeyOrOauth;
+            apiBase = copilotApiBase;
         }
-
-        var tokenJson = await tokenResp.Content.ReadAsStringAsync(ct);
-        var tokenData = JsonSerializer.Deserialize(tokenJson, HyprChatJsonContext.Default.CopilotTokenResponse);
-        if (tokenData is null || string.IsNullOrEmpty(tokenData.Token) ||
-            string.IsNullOrEmpty(tokenData.Endpoints?.Api))
-            return new ModelListResult();
-
-        var apiBase = tokenData.Endpoints.Api;
-        var sessionToken = tokenData.Token;
-
-        // Notify QML about the API endpoint + session token
-        _transport.SendNotification("models/copilotApiReady", new CopilotApiResult
+        else
         {
-            ApiBase = apiBase,
-            Token = sessionToken
-        }, HyprChatJsonContext.Default.RpcNotificationCopilotApiResult);
+            // Exchange OAuth token for session token
+            using var tokenReq = new HttpRequestMessage(HttpMethod.Get,
+                "https://api.github.com/copilot_internal/v2/token");
+            tokenReq.Headers.TryAddWithoutValidation("Authorization", $"token {apiKeyOrOauth}");
+            tokenReq.Headers.TryAddWithoutValidation("Accept", "application/json");
+
+            using var tokenResp = await _http.SendAsync(tokenReq, ct);
+            if (!tokenResp.IsSuccessStatusCode)
+            {
+                var body = await tokenResp.Content.ReadAsStringAsync(ct);
+                if (body.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
+                    body.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
+                {
+                    _transport.SendSignal("models/tokenExpired");
+                }
+                return new ModelListResult();
+            }
+
+            var tokenJson = await tokenResp.Content.ReadAsStringAsync(ct);
+            var tokenData = JsonSerializer.Deserialize(tokenJson, HyprChatJsonContext.Default.CopilotTokenResponse);
+            if (tokenData is null || string.IsNullOrEmpty(tokenData.Token) ||
+                string.IsNullOrEmpty(tokenData.Endpoints?.Api))
+                return new ModelListResult();
+
+            apiBase = tokenData.Endpoints.Api;
+            sessionToken = tokenData.Token;
+
+            _transport.SendNotification("models/copilotApiReady", new CopilotApiResult
+            {
+                ApiBase = apiBase,
+                Token = sessionToken
+            }, HyprChatJsonContext.Default.RpcNotificationCopilotApiResult);
+        }
 
         // Step 2: Fetch models
         using var modelsReq = new HttpRequestMessage(HttpMethod.Get, $"{apiBase}/models");

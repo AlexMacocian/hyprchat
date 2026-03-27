@@ -52,6 +52,9 @@ public static class ToolDefinitions
         Def("memory_reorganize",
             "Split a large memory topic into smaller subtopics. Use when a topic exceeds the size threshold. The original topic is deleted and replaced with subtopics under a directory.",
             """{"type":"object","properties":{"source_topic":{"type":"string","description":"The topic to split"},"subtopics":{"type":"array","description":"Array of new subtopics to create","items":{"type":"object","properties":{"name":{"type":"string","description":"Subtopic name (will be created as source_topic/name)"},"content":{"type":"string","description":"Markdown content for this subtopic"}},"required":["name","content"]}}},"required":["source_topic","subtopics"]}"""),
+        Def("memory_delete",
+            "Delete a memory topic and all its content. Use when information is outdated, wrong, or the topic is empty.",
+            """{"type":"object","properties":{"topic":{"type":"string","description":"Topic name to delete"}},"required":["topic"]}"""),
     ];
 
     // --- Web ---

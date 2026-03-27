@@ -115,6 +115,7 @@ FloatingWindow {
         onModelsFetched: (models) => {
             backendSwitcher.models = models;
             backendSwitcher.loadingModels = false;
+            window._fetchedModels = models;
         }
 
         onKeyRetrieved: (account, key) => {
@@ -255,6 +256,7 @@ FloatingWindow {
                 if (apiBase && token) {
                     backend.apiUrl = apiBase + "/chat/completions";
                     backend.apiKey = token;
+                    backend.copilotApiBase = apiBase;
                     backend.extraHeaders = [
                         "Editor-Version: vscode/1.105.1",
                         "Editor-Plugin-Version: copilot-chat/0.26.7",
@@ -262,6 +264,8 @@ FloatingWindow {
                         "User-Agent: GitHubCopilotChat/0.26.7"
                     ];
                     apiKeyPrompt.shown = false;
+                    // Fetch models now that we have the session token
+                    backend.fetchModels("copilot", token, "");
                 } else {
                     console.warn("Copilot token response missing endpoints or token");
                     window.startGhLogin();
@@ -796,6 +800,7 @@ FloatingWindow {
         id: prefsView
         anchors.fill: parent
         preferences: prefs
+        backendProcess: backend
     }
 
     // Escape to hide

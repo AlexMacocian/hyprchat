@@ -223,6 +223,9 @@ public sealed class ModelFetchParams
 
   [JsonPropertyName("apiUrl")]
   public string ApiUrl { get; set; } = "";
+
+  [JsonPropertyName("copilotApiBase")]
+  public string CopilotApiBase { get; set; } = "";
 }
 
 public sealed class ModelInfo
