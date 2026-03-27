@@ -1,77 +1,61 @@
 # MCP Support
 
-Model Context Protocol integration for HyprChat.
+Model Context Protocol tools for HyprChat.
 
 ## Overview
 
-HyprChat uses MCP to give the LLM access to local tools — reading
-files, managing persistent memory, and potentially more in the future.
+HyprChat gives the LLM access to local tools for file access,
+persistent memory, web search, shell commands, and date/time.
 
-MCP servers run as local child processes. HyprChat's `McpClient`
-spawns each server, communicates over stdin/stdout JSON-RPC, and
-exposes discovered tools to the LLM through the backend's tool-calling
-interface.
+All tools are implemented inside the NativeAOT .NET backend binary.
+Tool definitions follow the OpenAI function calling format. The
+backend handles the entire tool-use loop internally — the QML
+frontend only renders tool call/result notifications.
 
 ## Architecture
 
 ```mermaid
 graph TD
-    CS[ChatService] --> B["Backend\n(streams to LLM with tool definitions)"]
-    CS --> MC[McpClient]
-    MC --> FS["QProcess: filesystem MCP server"]
-    MC --> MM["QProcess: memory MCP server"]
+    CS[ChatService] -->|tool calls| TD[ToolDispatcher]
+    TD --> MEM[MemoryStore]
+    TD --> FS[FileService]
+    TD --> WEB[WebService]
+    TD --> SH[ShellExecutor]
+    TD --> DT[DateTools]
+    TD -->|results| CS
 ```
-
-### Startup Flow
-
-1. `McpClient` reads MCP server config from `config.json`
-2. Spawns each configured server as a `QProcess`
-3. Sends `initialize` to each server
-4. Calls `tools/list` to discover available tools
-5. Converts responses into `ToolDefinition` objects
-6. `ChatService` collects all tool definitions and passes them to
-   the active backend on each `stream()` call
 
 ### Tool Execution Flow
 
-1. LLM responds with a tool call (parsed by the backend)
-2. `ChatService` receives `toolCallRequested` signal
-3. Routes to the correct MCP server based on tool name
-4. Sends `tools/call` with the tool name and arguments
-5. Reads the result from the server's stdout
-6. Wraps result in a `ToolResult` and appends to message history
-7. Calls `stream()` again so the LLM can continue
+1. LLM responds with tool calls (parsed from SSE stream)
+2. `ChatService` passes each to `ToolDispatcher`
+3. `ToolDispatcher` routes by tool name to the appropriate service
+4. Service executes and returns a result string
+5. Result appended to message history as a `tool` role message
+6. `ChatService` sends another request to the LLM with results
+7. Repeat until model responds with text only
 
-## Configured Servers
+## Configured Tools
 
 | Server | Purpose | Details |
 | ------ | ------- | ------- |
-| [File System MCP](mcp-filesystem.md) | Read-only file access | Scoped to configured directories |
-| [Memory MCP](mcp-memory.md) | Persistent memory | Read/append markdown files by topic |
-| [Shell MCP](mcp-shell.md) | Terminal command execution | Spawns a visible terminal, tracks lifecycle |
-| [Web MCP](mcp-web.md) | Internet search and scraping | Search + rerank + extract page content |
+| [File System](mcp-filesystem.md) | Read/write file access | Scoped to configured root |
+| [Memory](mcp-memory.md) | Persistent encrypted memory | Topic-based markdown files |
+| [Shell](mcp-shell.md) | Terminal command execution | Via kitty remote control |
+| [Web](mcp-web.md) | Internet search and scraping | DuckDuckGo + SmartReader |
+| [Date & Time](mcp-date.md) | Real-time date/time tools | Pure computation |
 
 ## Configuration
 
-MCP servers are configured in `~/.config/hyprchat/config.json`:
+Tools are toggled in `~/.config/hyprchat/preferences.json`:
 
 ```json
 {
-  "mcp": {
-    "filesystem": {
-      "roots": ["~/Dev", "~/Documents"]
-    },
-    "memory": {
-      "path": "~/.config/hyprchat/memory"
-    }
-  }
+  "memory_enabled": true,
+  "web_search_enabled": true,
+  "shell_enabled": false,
+  "file_access_enabled": true,
+  "date_enabled": true,
+  "file_access_root": "/"
 }
 ```
-
-## Transport
-
-All MCP communication uses stdio (stdin/stdout JSON-RPC):
-
-- Simple — no HTTP server, no ports, no auth
-- Secure — child processes inherit only what's needed
-- Standard — follows the MCP specification for stdio transport

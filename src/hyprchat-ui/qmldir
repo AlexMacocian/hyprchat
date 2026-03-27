@@ -8,12 +8,6 @@ GhLoginFlow GhLoginFlow.qml
 BackendSwitcher BackendSwitcher.qml
 MemoryView MemoryView.qml
 PreferencesView PreferencesView.qml
-OpenAIBackend OpenAIBackend.qml
-KeyringService KeyringService.qml
 Preferences Preferences.qml
-ModelFetcher ModelFetcher.qml
-MemoryService MemoryService.qml
-WebSearchService WebSearchService.qml
-ShellService ShellService.qml
 ProfileSwitcher ProfileSwitcher.qml
-FileService FileService.qml
+BackendProcess BackendProcess.qml

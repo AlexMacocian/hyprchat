@@ -4,13 +4,14 @@ Lightweight AI chat panel for Hyprland. Quick, disposable conversations
 accessible from a keybind - no editor or browser required.
 
 Built with [QuickShell](https://quickshell.outfoxxed.me) (Qt6/QML) as
-a resident Hyprland shell widget.
+a resident Hyprland shell widget, with a NativeAOT .NET backend for
+LLM streaming, tool execution, and services.
 
-- Toggle from anywhere with a keybind — no process spawn, instant show
+- Toggle from anywhere with a keybind - no process spawn, instant show
 - Multiple LLM backends: GitHub Copilot, OpenAI, Claude, Ollama, custom
-- Tool use via MCP (file access, persistent memory)
-- Themed by the theme engine
-- ~20-40MB resident, no WebView
+- Tool use via MCP (file access, persistent memory, web search, shell, date/time)
+- NativeAOT backend — single 11MB binary, no runtime dependencies
+- Themed using theme.jsonc file
 
 ## Documentation
 
@@ -56,25 +57,27 @@ paru -S hyprchat
 #### Dependencies
 
 - [QuickShell](https://quickshell.outfoxxed.me) (0.2+)
-- Node.js (for web scraper)
+- .NET SDK 10+ (build only — NativeAOT binary has no runtime dependency)
 - gnome-keyring + libsecret (for secret storage)
 - openssl (for memory encryption)
+- inotify-tools (for shell command completion detection)
+- kitty (for shell MCP terminal)
 
 ### Install
 
 ```bash
 # Install system dependencies (Arch/CachyOS)
-sudo pacman -S gnome-keyring libsecret nodejs npm
+sudo pacman -S gnome-keyring libsecret openssl inotify-tools kitty dotnet-sdk
 
-# Clone and install Node dependencies
-cd src/scraper && npm install && cd ../..
+# Clone and build the NativeAOT backend
+cd src/hyprchat-backend && dotnet publish -c Release && cd ../..
 
 # Symlink for development
-ln -sf $(pwd)/src ~/.config/quickshell/hyprchat
+ln -sf $(pwd)/src/hyprchat-ui ~/.config/quickshell/hyprchat
 
 # Or copy for production
 mkdir -p ~/.config/quickshell/hyprchat
-cp -r src/* ~/.config/quickshell/hyprchat/
+cp -r src/hyprchat-ui/* ~/.config/quickshell/hyprchat/
 
 # Launch
 quickshell -c hyprchat

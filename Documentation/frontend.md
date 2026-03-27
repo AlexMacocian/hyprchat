@@ -4,83 +4,56 @@ QML UI, theming, and Hyprland integration.
 
 ## UI Overview
 
-Minimal chat interface implemented as QML components:
+Minimal chat interface implemented as QML components in
+`src/hyprchat-ui/`:
 
 - **Chat area** — `ListView` with a `ListModel` of messages. Markdown
-  rendered via Qt's built-in `TextEdit.MarkdownText` format (Qt 6.5+).
-  User messages right-aligned, assistant messages left-aligned.
-- **Input bar** — `TextArea` at the bottom. Enter to send, Shift+Enter
-  for newline. Escape to toggle the window closed.
-- **Backend indicator** — `Label` in the top bar showing active
-  backend + model. Click opens a popup to switch backends.
-- **New chat** — button or Ctrl+N. Clears the message model, keeps
-  the window open.
-
-No sidebar, no chat history browser, no settings panels beyond the
-backend switcher. Configuration lives in the JSON file.
+  rendered via Qt's built-in `TextEdit.MarkdownText` (Qt 6.5+).
+- **Input bar** — `TextArea` at the bottom. Enter to send,
+  Shift+Enter for newline. Stop button during streaming.
+- **Top bar** — Profile switcher, backend/model label, sign-out
+  button, memory viewer toggle, preferences toggle.
+- **Memory viewer** — overlay panel for browsing, reading, editing,
+  and deleting memory topics (fetches from backend via JSON-RPC).
+- **Preferences** — scrollable overlay for tool toggles, thresholds,
+  profile management.
 
 ## QML Components
 
 | File | Purpose |
 | ---- | ------- |
-| `ChatWindow.qml` | Main panel window — layer-shell surface, layout container |
-| `ChatView.qml` | Scrollable message list (`ListView` + `ListModel`) |
-| `MessageBubble.qml` | Single message display with markdown rendering |
-| `InputBar.qml` | Text input area with key handling |
-| `BackendSwitcher.qml` | Backend selection popup |
-| `Theme.qml` | Theme singleton — exposes color/font properties |
+| `shell.qml` | Entry point — `ShellRoot` with `ChatWindow` |
+| `ChatWindow.qml` | Main window — layout, orchestration, auth |
+| `BackendProcess.qml` | JSON-RPC bridge to the NativeAOT backend |
+| `ChatView.qml` | Scrollable message list |
+| `MessageBubble.qml` | Single message with markdown rendering |
+| `InputBar.qml` | Text input with key handling |
+| `BackendSwitcher.qml` | Backend/model selection dropdown |
+| `ProfileSwitcher.qml` | Profile selection dropdown |
+| `MemoryView.qml` | Memory browser/editor panel |
+| `PreferencesView.qml` | Settings panel (scrollable) |
+| `ApiKeyPrompt.qml` | API key entry prompt |
+| `GhLoginFlow.qml` | GitHub OAuth device flow UI |
+| `Preferences.qml` | Preferences persistence (JSON file) |
+| `Theme.qml` | Theme singleton — colors/fonts |
 
 ## Hyprland Integration
 
-QuickShell runs as a resident daemon and communicates with Hyprland
-over its IPC socket (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`).
-
-### Keybind Toggle
-
-The keybind dispatches to QuickShell directly — no window rules needed:
-
-```conf
-bind = $mainMod, G, exec, quickshell -m hyprchat toggle
-```
-
-QuickShell receives the `toggle` message and shows/hides the panel
-window. The panel is a Wayland layer-shell surface, so Hyprland
-doesn't tile it — it floats above everything by default.
-
-Alternatively, use Hyprland's `global` keybind feature to dispatch
-directly without exec:
+QuickShell runs as a resident daemon. Toggle with:
 
 ```conf
 bind = $mainMod, G, global, hyprchat:toggle
 ```
 
-QuickShell listens for the global shortcut and toggles visibility.
+The panel is a `FloatingWindow` (Wayland layer-shell surface) — not
+managed by the tiling layout. 700×500, centered.
 
-### Window Behavior
+## Theme
 
-- **Layer shell surface** — floats above all windows, not managed by
-  the tiling layout
-- **Centered** — positioned at screen center via anchor + margin
-  calculations, or via QuickShell's `PanelWindow` anchoring
-- **Focus on show** — grabs keyboard focus when toggled visible
-- **Size** — 700×500, fixed
-
-No `windowrulev2` entries needed in the Hyprland config.
-
-## Theme Integration
-
-Themed via a JSONC file (JSON with comments) at
-`~/.config/hyprchat/theme.jsonc`. HyprChat reads it at startup and
-watches for changes via `inotifywait` — colors update live when the
-file is modified.
-
-If the file doesn't exist, HyprChat creates it with default values
-on first launch.
+Themed via `~/.config/hyprchat/theme.jsonc`. Watched for live reload
+via `inotifywait`. If missing, created with defaults.
 
 ```jsonc
-// HyprChat theme file (JSONC)
-// Edit this file to customize colors and fonts.
-// Changes are applied automatically.
 {
   "bg0": "#0F0808",
   "bg1": "#1C1210",
@@ -96,6 +69,5 @@ on first launch.
 }
 ```
 
-A `Theme` singleton loads this file and exposes each value as a
-QML property. All UI components bind to `Theme.bg0`, `Theme.accent1`,
-etc. If the theme file is missing, built-in defaults are used.
+`Theme.qml` loads this file and exposes each value as a QML property.
+All UI components bind to `Theme.bg0`, `Theme.accent1`, etc.

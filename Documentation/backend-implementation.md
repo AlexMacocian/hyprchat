@@ -1,89 +1,95 @@
 # Backend Implementation
 
 How HyprChat orchestrates conversations, manages tools, and streams
-responses. Everything is implemented in QML using QuickShell's
-`Process` and `SplitParser` APIs.
+responses.
 
 ## Architecture
 
+The backend is a NativeAOT .NET 10 binary that communicates with the
+QML frontend via newline-delimited JSON-RPC over stdin/stdout. It
+owns the entire LLM interaction: streaming, tool execution loop,
+memory, keyring, and model fetching.
+
 ```mermaid
 flowchart TD
-    U[User sends message] --> CW[ChatWindow]
-    CW --> OAI[OpenAIBackend]
-    OAI -->|curl SSE| API[LLM API]
-    API -->|tokens| OAI
-    OAI -->|tokenReceived| CW
-    OAI -->|toolCallReceived| CW
-    CW -->|execute| MEM[MemoryService]
-    CW -->|execute| WEB[WebSearchService]
-    CW -->|execute| SH[ShellService]
-    CW -->|execute| FS[FileService]
-    CW -->|results| OAI
-    OAI -->|continue| API
+    U[User sends message] --> CW[ChatWindow.qml]
+    CW -->|JSON-RPC| BP[BackendProcess]
+    BP -->|stdin| BE[NativeAOT Backend]
+    BE --> CS[ChatService]
+    CS -->|HttpClient SSE| API[LLM API]
+    API -->|tokens| CS
+    CS -->|tool calls| TD[ToolDispatcher]
+    TD --> MEM[MemoryStore]
+    TD --> WEB[WebService]
+    TD --> SH[ShellExecutor]
+    TD --> FS[FileService]
+    TD --> DT[DateTools]
+    TD -->|results| CS
+    CS -->|continue| API
+    CS -->|notifications| BP
+    BP -->|stdout| CW
 ```
 
-## OpenAIBackend
+## ChatService
 
-A single QML component (`OpenAIBackend.qml`) that handles all LLM
-communication. Works with any OpenAI-compatible API: GitHub Copilot,
-OpenAI, Claude (via Copilot), Ollama.
+`ChatService.cs` handles streaming chat completions from any
+OpenAI-compatible API:
 
-### Streaming
+1. Builds system prompt via `SystemPromptBuilder`
+2. Builds tool definitions via `ToolDefinitions`
+3. Sends POST to the LLM API via `HttpClient`
+4. Reads SSE stream line by line
+5. Parses `delta.content` (tokens) and `delta.tool_calls`
+6. Emits `chat/token` notifications for each token
+7. On tool calls: executes via `ToolDispatcher`, appends results,
+   loops back to the LLM
+8. Emits `chat/finished` when done
 
-Uses `curl` with SSE (Server-Sent Events) via `Process` +
-`SplitParser` with `splitMarker: "\n\n"`:
+### Tool-Use Loop
 
-1. Request body written to temp file via `Process` stdin
-2. `curl -sN --no-buffer` streams the response
-3. `SplitParser` splits on double-newline (SSE event boundary)
-4. Each `data: {...}` line is parsed for `delta.content` (tokens)
-   and `delta.tool_calls` (tool invocations)
-5. Tokens emitted via `tokenReceived` signal
-6. Tool calls accumulated and emitted via `toolCallReceived` on stream end
+The backend owns the entire loop internally:
 
-### System Prompt Assembly
+1. Stream response from the LLM
+2. If tool calls present → execute each via `ToolDispatcher`
+3. Notify QML about each tool call and result (for UI display)
+4. Append tool results to message history
+5. Re-send to LLM
+6. Repeat until LLM responds with text only
+7. Capped at 100 iterations
 
-The system prompt is assembled dynamically from:
+The QML frontend only renders — it never dispatches tools.
 
-1. **Profile system prompt** — user-configured per profile
-2. **Memory instructions** — appended when memory is enabled
-3. **Web search instructions** — appended when web search is enabled
-4. **Shell instructions** — appended when shell is enabled
-5. **File access instructions** — appended when file access is enabled
+## JSON-RPC Protocol
 
-### Copilot Authentication
+### Requests (QML → Backend)
 
-GitHub Copilot uses a multi-step flow:
+| Method | Description |
+|--------|-------------|
+| `chat/send` | Start a chat completion with tool loop |
+| `chat/cancel` | Cancel the active stream |
+| `models/fetch` | Fetch available models for a backend |
+| `keyring/lookup` | Look up a secret from the keyring |
+| `keyring/store` | Store a secret in the keyring |
+| `keyring/delete` | Delete a secret from the keyring |
+| `memory/list` | List memory topics (for MemoryView UI) |
+| `memory/read` | Read a memory topic (for MemoryView UI) |
+| `memory/edit` | Edit a memory topic (for MemoryView UI) |
+| `memory/delete` | Delete a memory topic (for MemoryView UI) |
 
-1. OAuth device flow (`github.com/login/device/code`) → user authorizes in browser
-2. OAuth token (`ghu_...`) stored in system keyring
-3. Token exchanged at `api.github.com/copilot_internal/v2/token` → session token + API endpoint
-4. Session token used for `/chat/completions` and `/models`
-5. Auto-refresh when token expires
+### Notifications (Backend → QML)
 
-## Tool-Use Loop
-
-`ChatWindow` owns the tool-use loop:
-
-1. Backend streams response
-2. If response contains tool calls → `toolCallReceived` fires
-3. ChatWindow executes each tool (sync or async)
-4. Tool results fed back via `backend.continueWithToolResults()`
-5. Backend sends another request with results appended
-6. Repeat until model responds with text only
-7. Loop capped at 10 iterations
-
-### Sync vs Async Tools
-
-| Tool | Type | Service |
-|------|------|---------|
-| `memory_*` | Sync (from cache) | MemoryService |
-| `web_search`, `web_read_page` | Async | WebSearchService |
-| `shell_exec`, `shell_exec_background` | Async | ShellService |
-| `fs_*` | Async | FileService |
-
-Async tools use a pending state + signal pattern. When all async
-results arrive, the conversation continues.
+| Method | Description |
+|--------|-------------|
+| `ready` | Backend initialized |
+| `chat/token` | Streamed token |
+| `chat/toolCall` | Tool being executed |
+| `chat/toolResult` | Tool result preview |
+| `chat/usage` | Token usage stats |
+| `chat/finished` | Stream complete |
+| `chat/error` | Error occurred |
+| `chat/tokenExpired` | API token expired |
+| `models/copilotApiReady` | Copilot session token ready |
+| `models/tokenExpired` | Models fetch token expired |
 
 ## Configuration
 
@@ -91,7 +97,6 @@ All configuration is in `~/.config/hyprchat/preferences.json`:
 
 ```jsonc
 {
-  // Active profile determines backend, model, and system prompt
   "active_profile": "Assistant",
   "profiles": [
     {
@@ -102,34 +107,17 @@ All configuration is in `~/.config/hyprchat/preferences.json`:
       "systemPrompt": "You are a helpful assistant. Be concise."
     }
   ],
-  // Tool toggles
   "memory_enabled": true,
   "web_search_enabled": true,
   "shell_enabled": false,
   "file_access_enabled": true,
+  "date_enabled": true,
   "file_access_root": "/",
-  // Context management
   "summarize_threshold": 0.7,
   "keep_recent_messages": 4,
-  // Memory
   "memory_split_threshold": 200
 }
 ```
 
-API keys are stored in the system keyring via `secret-tool` (libsecret).
+API keys are stored in the system keyring via `secret-tool`.
 See [Authentication](authentication.md) for details.
-
-## Preferences
-
-`Preferences.qml` loads/saves the JSON config. All properties are
-reactive — changes propagate immediately to the UI and backend.
-
-Profiles are managed through the Preferences UI with auto-save on
-edit. Global settings (tool toggles, thresholds) are saved on the
-Preferences panel's Save button.
-
-## Theme
-
-`Theme.qml` loads colors from `~/.config/hyprchat/theme.jsonc`.
-File is watched via `inotifywait` for live reload. See
-[Frontend](frontend.md) for the theme file format.

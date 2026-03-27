@@ -7,11 +7,35 @@ Item {
     id: root
 
     property bool shown: false
-    property var memoryService: null
+    property var backendProcess: null
     property string selectedTopic: ""
     property bool editing: false
+    property var _topics: []
+    property string _topicContent: ""
+    property int _refreshCount: 0
 
     visible: shown
+
+    onShownChanged: {
+        if (shown && backendProcess) {
+            _refreshTopics();
+        }
+    }
+
+    function _refreshTopics() {
+        if (!backendProcess) return;
+        backendProcess.memoryList(function(topics) {
+            root._topics = topics;
+            root._refreshCount++;
+        });
+    }
+
+    function _loadTopicContent(topic) {
+        if (!backendProcess) return;
+        backendProcess.memoryRead(topic, function(content) {
+            root._topicContent = content;
+        });
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -94,8 +118,11 @@ Item {
                             onClicked: {
                                 if (root.editing) {
                                     // Save
-                                    root.memoryService.editTopic(root.selectedTopic, contentEditor.text);
+                                    if (root.backendProcess) {
+                                        root.backendProcess.memoryEdit(root.selectedTopic, contentEditor.text);
+                                    }
                                     root.editing = false;
+                                    root._loadTopicContent(root.selectedTopic);
                                 } else {
                                     root.editing = true;
                                 }
@@ -125,9 +152,12 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: {
-                                root.memoryService.deleteTopic(root.selectedTopic);
+                                if (root.backendProcess) {
+                                    root.backendProcess.memoryDelete(root.selectedTopic);
+                                }
                                 root.selectedTopic = "";
                                 root.editing = false;
+                                root._refreshTopics();
                             }
                         }
                     }
@@ -179,14 +209,13 @@ Item {
                     id: topicList
                     anchors.fill: parent
                     anchors.margins: 8
-                    visible: root.selectedTopic.length === 0 && root.memoryService !== null
+                    visible: root.selectedTopic.length === 0 && root.backendProcess !== null
                     clip: true
                     spacing: 2
 
                     model: {
-                        if (!root.memoryService) return [];
-                        let v = root.memoryService._cacheVersion;
-                        return root.memoryService.topicNames;
+                        let v = root._refreshCount;
+                        return root._topics;
                     }
 
                     delegate: Rectangle {
@@ -211,17 +240,6 @@ Item {
                             }
 
                             Text {
-                                text: {
-                                    let content = root.memoryService.readTopic(modelData);
-                                    let lines = content.split("\n").length;
-                                    return lines + " lines";
-                                }
-                                color: Theme.textDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize - 2
-                            }
-
-                            Text {
                                 text: "›"
                                 color: Theme.textDim
                                 font.family: Theme.fontFamily
@@ -236,6 +254,7 @@ Item {
                             onClicked: {
                                 root.selectedTopic = modelData;
                                 root.editing = false;
+                                root._loadTopicContent(modelData);
                             }
                         }
                     }
@@ -277,11 +296,7 @@ Item {
                         id: contentView
                         visible: !root.editing
                         width: contentFlickable.width
-                        text: {
-                            if (!root.memoryService || root.selectedTopic.length === 0) return "";
-                            let v = root.memoryService._cacheVersion;
-                            return root.memoryService.readTopic(root.selectedTopic);
-                        }
+                        text: root._topicContent
                         color: Theme.text
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
@@ -298,11 +313,7 @@ Item {
                         id: contentEditor
                         visible: root.editing
                         width: contentFlickable.width
-                        text: {
-                            if (!root.memoryService || root.selectedTopic.length === 0) return "";
-                            let v = root.memoryService._cacheVersion;
-                            return root.memoryService.readTopic(root.selectedTopic);
-                        }
+                        text: root._topicContent
                         color: Theme.text
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
