@@ -31,7 +31,7 @@ Item {
                 anchors.margins: 8
                 color: Theme.text
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
+                font.pixelSize: Theme.fontSize + 2
                 wrapMode: TextEdit.Wrap
                 focus: true
 

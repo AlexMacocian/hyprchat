@@ -68,7 +68,7 @@ Item {
                             text: modelData.name
                             color: modelData.name === root.activeProfileName ? Theme.bg0 : Theme.text
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
+                            font.pixelSize: Theme.fontSize + 2
                             font.bold: modelData.name === root.activeProfileName
                         }
 

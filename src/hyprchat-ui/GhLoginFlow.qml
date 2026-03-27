@@ -197,7 +197,7 @@ Item {
                 text: root.statusText
                 color: Theme.textDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize - 1
+                font.pixelSize: Theme.fontSize + 1
                 Layout.fillWidth: true
             }
 

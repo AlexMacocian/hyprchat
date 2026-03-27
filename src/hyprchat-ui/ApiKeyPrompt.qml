@@ -36,7 +36,7 @@ Item {
                 text: "API key required for **" + root.backendName + "**"
                 color: Theme.text
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
+                font.pixelSize: Theme.fontSize + 2
                 textFormat: Text.MarkdownText
                 Layout.fillWidth: true
             }

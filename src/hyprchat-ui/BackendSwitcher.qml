@@ -51,7 +51,7 @@ Item {
                 text: "Backend"
                 color: Theme.textDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize - 2
+                font.pixelSize: Theme.fontSize
                 font.bold: true
                 Layout.fillWidth: true
                 Layout.leftMargin: 4

@@ -60,7 +60,7 @@ Item {
                         text: root.selectedTopic.length > 0 ? ("Memory: " + root.selectedTopic) : "Memory"
                         color: Theme.text
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
+                        font.pixelSize: Theme.fontSize + 2
                         font.bold: true
                     }
 

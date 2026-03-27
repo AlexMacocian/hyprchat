@@ -439,7 +439,7 @@ FloatingWindow {
                         text: "HyprChat"
                         color: Theme.text
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
+                        font.pixelSize: Theme.fontSize + 2
                         font.bold: true
                     }
 
