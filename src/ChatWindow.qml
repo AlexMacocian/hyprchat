@@ -619,6 +619,59 @@ FloatingWindow {
         }
     ]
 
+    readonly property var dateTools: [
+        {
+            type: "function",
+            function: {
+                name: "date_now",
+                description: "Get the current date and time with timezone.",
+                parameters: { type: "object", properties: {}, required: [] }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "date_info",
+                description: "Get detailed information about a date: day of week, week number, day of year, leap year.",
+                parameters: {
+                    type: "object",
+                    properties: { date: { type: "string", description: "Date in YYYY-MM-DD format" } },
+                    required: ["date"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "date_diff",
+                description: "Calculate the number of days between two dates.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        date1: { type: "string", description: "Start date in YYYY-MM-DD format" },
+                        date2: { type: "string", description: "End date in YYYY-MM-DD format" }
+                    },
+                    required: ["date1", "date2"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "date_add",
+                description: "Add or subtract days from a date. Use negative days to subtract.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        date: { type: "string", description: "Starting date in YYYY-MM-DD format" },
+                        days: { type: "integer", description: "Number of days to add (negative to subtract)" }
+                    },
+                    required: ["date", "days"]
+                }
+            }
+        }
+    ]
+
     // Combine active tools based on preferences
     readonly property var activeTools: {
         let t = [];
@@ -626,6 +679,7 @@ FloatingWindow {
         if (prefs.webSearchEnabled) t = t.concat(webTools);
         if (prefs.shellEnabled) t = t.concat(shellTools);
         if (prefs.fileAccessEnabled) t = t.concat(fileTools);
+        if (prefs.dateEnabled) t = t.concat(dateTools);
         return t;
     }
 
@@ -643,6 +697,7 @@ FloatingWindow {
         webSearchEnabled: prefs.webSearchEnabled
         shellEnabled: prefs.shellEnabled
         fileAccessEnabled: prefs.fileAccessEnabled
+        dateEnabled: prefs.dateEnabled
         tools: window.activeTools
 
         onTokenReceived: (token) => {
@@ -715,7 +770,6 @@ FloatingWindow {
 
                 if (tc.name === "web_search" || tc.name === "web_read_page") {
                     // Async tool — will be resolved later
-                    asyncCount++;
                     try {
                         let args = JSON.parse(tc.arguments);
                         if (tc.name === "web_search") {
@@ -723,11 +777,11 @@ FloatingWindow {
                         } else {
                             webSearch.fetchPage(args.url, tc.id);
                         }
+                        asyncCount++; // Only count as async if dispatch succeeded
                     } catch (e) {
                         toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
                     }
                 } else if (tc.name === "shell_exec" || tc.name === "shell_exec_background") {
-                    asyncCount++;
                     try {
                         let args = JSON.parse(tc.arguments);
                         if (tc.name === "shell_exec") {
@@ -735,12 +789,12 @@ FloatingWindow {
                         } else {
                             shellService.execBackground(args.command, tc.id);
                         }
+                        asyncCount++; // Only count as async if dispatch succeeded
                     } catch (e) {
                         toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
                     }
                 } else if (tc.name.indexOf("fs_") === 0) {
                     // File system tools (async)
-                    asyncCount++;
                     try {
                         let args = {};
                         try { args = JSON.parse(tc.arguments || "{}"); } catch(e) { args = {}; }
@@ -753,11 +807,12 @@ FloatingWindow {
                         } else if (tc.name === "fs_search_files") {
                             fileService.searchFiles(args.pattern, args.root || "", tc.id);
                         }
+                        asyncCount++; // Only count as async if dispatch succeeded
                     } catch (e) {
                         toolResults.push({ role: "tool", tool_call_id: tc.id, content: "Error: " + e });
                     }
                 } else {
-                    // Sync tool (memory)
+                    // Sync tool (memory, date)
                     let result = window.executeTool(tc.name, tc.arguments);
                     console.log("ChatWindow: tool", tc.name, "->", result.substring(0, 100));
                     toolResults.push({ role: "tool", tool_call_id: tc.id, content: result });
@@ -853,6 +908,60 @@ FloatingWindow {
                     return "Error: memory_reorganize requires source_topic and subtopics array";
                 }
                 return memoryService.reorganizeTopic(args.source_topic, args.subtopics);
+            }
+
+            // --- Date tools ---
+            if (name === "date_now") {
+                let now = new Date();
+                let dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                return now.toISOString() + " (" + dayNames[now.getDay()] + ")";
+            }
+
+            if (name === "date_info") {
+                let d = new Date(args.date);
+                if (isNaN(d.getTime())) return "Error: invalid date '" + args.date + "'. Use YYYY-MM-DD format.";
+                let dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                let y = d.getFullYear();
+                let start = new Date(y, 0, 1);
+                let dayOfYear = Math.floor((d - start) / 86400000) + 1;
+                // ISO week number
+                let jan4 = new Date(y, 0, 4);
+                let weekStart = new Date(jan4);
+                weekStart.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
+                let weekNum = Math.floor((d - weekStart) / 604800000) + 1;
+                if (weekNum < 1) { weekNum = 52; }
+                let leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+                return "Date: " + d.toISOString().split('T')[0] + "\n" +
+                    "Day of week: " + dayNames[d.getDay()] + "\n" +
+                    "Day of year: " + dayOfYear + "/" + (leap ? 366 : 365) + "\n" +
+                    "ISO week: " + weekNum + "\n" +
+                    "Leap year: " + (leap ? "yes" : "no");
+            }
+
+            if (name === "date_diff") {
+                let d1 = new Date(args.date1);
+                let d2 = new Date(args.date2);
+                if (isNaN(d1.getTime())) return "Error: invalid date1 '" + args.date1 + "'. Use YYYY-MM-DD format.";
+                if (isNaN(d2.getTime())) return "Error: invalid date2 '" + args.date2 + "'. Use YYYY-MM-DD format.";
+                let diffMs = d2.getTime() - d1.getTime();
+                let diffDays = Math.round(diffMs / 86400000);
+                let absDays = Math.abs(diffDays);
+                let weeks = Math.floor(absDays / 7);
+                let remDays = absDays % 7;
+                return "From " + d1.toISOString().split('T')[0] + " to " + d2.toISOString().split('T')[0] + ":\n" +
+                    "Days: " + diffDays + "\n" +
+                    "(" + weeks + " weeks and " + remDays + " days)";
+            }
+
+            if (name === "date_add") {
+                let d = new Date(args.date);
+                if (isNaN(d.getTime())) return "Error: invalid date '" + args.date + "'. Use YYYY-MM-DD format.";
+                let days = parseInt(args.days, 10);
+                if (isNaN(days)) return "Error: invalid days value '" + args.days + "'.";
+                let result = new Date(d);
+                result.setDate(result.getDate() + days);
+                let dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                return result.toISOString().split('T')[0] + " (" + dayNames[result.getDay()] + ")";
             }
 
             return "Unknown tool: " + name;

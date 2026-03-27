@@ -3,6 +3,10 @@
 // Usage: node scraper.js <url>
 // Outputs clean text content to stdout.
 
+// Skip TLS verification — this is a web scraper for public pages and
+// corporate proxies / MITM setups often use self-signed intermediates.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 const { Readability } = require("@mozilla/readability");
 const { parseHTML } = require("linkedom");
 

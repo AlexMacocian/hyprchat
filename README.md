@@ -40,6 +40,8 @@ transport, tool execution flow
 - [Shell MCP](Documentation/mcp-shell.md) — terminal command execution,
 visible terminal window
 - [Web MCP](Documentation/mcp-web.md) — internet search, reranking, and page scraping
+- [Date MCP](Documentation/mcp-date.md) — real-time date/time, day-of-week,
+date arithmetic
 
 ## Quick Start
 

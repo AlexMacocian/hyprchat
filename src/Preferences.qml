@@ -21,6 +21,7 @@ Item {
     property bool shellEnabled: false
     property bool fileAccessEnabled: true
     property string fileAccessRoot: "/"
+    property bool dateEnabled: true
 
     // --- Profiles ---
     property string activeProfileName: "Assistant"
@@ -109,7 +110,8 @@ Item {
             web_search_enabled: root.webSearchEnabled,
             shell_enabled: root.shellEnabled,
             file_access_enabled: root.fileAccessEnabled,
-            file_access_root: root.fileAccessRoot
+            file_access_root: root.fileAccessRoot,
+            date_enabled: root.dateEnabled
         }, null, 2);
 
         // Use printf to write to file — avoids shell escaping issues with echo
@@ -148,6 +150,7 @@ Item {
                     if (json.shell_enabled !== undefined) root.shellEnabled = json.shell_enabled;
                     if (json.file_access_enabled !== undefined) root.fileAccessEnabled = json.file_access_enabled;
                     if (json.file_access_root !== undefined) root.fileAccessRoot = json.file_access_root;
+                    if (json.date_enabled !== undefined) root.dateEnabled = json.date_enabled;
                 } catch (e) {
                     console.warn("Preferences: failed to parse:", e);
                 }

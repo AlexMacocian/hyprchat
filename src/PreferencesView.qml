@@ -18,6 +18,7 @@ Item {
     property bool editShellEnabled: false
     property bool editFileAccessEnabled: true
     property string editFileAccessRoot: "/"
+    property bool editDateEnabled: true
 
     // Profile editor state
     property bool editingProfile: false
@@ -43,6 +44,7 @@ Item {
             editShellEnabled = preferences.shellEnabled;
             editFileAccessEnabled = preferences.fileAccessEnabled;
             editFileAccessRoot = preferences.fileAccessRoot;
+            editDateEnabled = preferences.dateEnabled;
         }
     }
 
@@ -169,6 +171,7 @@ Item {
                                 root.preferences.shellEnabled = root.editShellEnabled;
                                 root.preferences.fileAccessEnabled = root.editFileAccessEnabled;
                                 root.preferences.fileAccessRoot = root.editFileAccessRoot;
+                                root.preferences.dateEnabled = root.editDateEnabled;
                                 root.preferences.save();
                                 root.shown = false;
                             }
@@ -214,11 +217,16 @@ Item {
                 Layout.fillHeight: true
                 clip: true
 
+                Flickable {
+                    id: settingsFlick
+                    anchors.fill: parent
+                    contentWidth: width
+                    contentHeight: settingsCol.implicitHeight
+                    boundsBehavior: Flickable.StopAtBounds
+
                 ColumnLayout {
                     id: settingsCol
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                    width: settingsFlick.width
                     spacing: 16
 
                     Item { Layout.preferredHeight: 8 }
@@ -931,6 +939,66 @@ Item {
                         color: Theme.border
                     }
 
+                    // --- Date & Time Toggle ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        spacing: 12
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "Date & Time"
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Give the model access to current date/time, day-of-week lookups, and date arithmetic."
+                                color: Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 2
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 44
+                            Layout.preferredHeight: 24
+                            radius: 12
+                            color: root.editDateEnabled ? Theme.accent1 : Theme.bg3
+
+                            Rectangle {
+                                x: root.editDateEnabled ? parent.width - width - 3 : 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 18; height: 18; radius: 9
+                                color: Theme.text
+                                Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.editDateEnabled = !root.editDateEnabled
+                            }
+                        }
+                    }
+
+                    // Separator
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        color: Theme.border
+                    }
+
                     // --- Summarize Threshold ---
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -1105,6 +1173,7 @@ Item {
                     }
 
                     Item { Layout.preferredHeight: 16 }
+                }
                 }
             }
         }
