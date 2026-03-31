@@ -121,6 +121,9 @@ FloatingWindow {
         onKeyRetrieved: (account, key) => {
             if (account === "copilot_oauth") {
                 window.exchangeCopilotToken(key);
+            } else if (account === "copilot_refresh") {
+                window._refreshingToken = false;
+                window.doCopilotRefresh(key);
             } else {
                 backend.apiKey = key;
                 apiKeyPrompt.shown = false;
@@ -129,6 +132,10 @@ FloatingWindow {
         onKeyMissing: (account) => {
             if (account === "copilot_oauth") {
                 window.startGhLogin();
+            } else if (account === "copilot_refresh") {
+                window._refreshingToken = false;
+                console.log("ChatWindow: no refresh token found, starting login");
+                window.startGhLogin();
             } else {
                 apiKeyPrompt.backendName = account;
                 apiKeyPrompt.shown = true;
@@ -136,9 +143,12 @@ FloatingWindow {
             }
         }
         onKeyStored: (account) => {
-            backend.keyringLookup(account);
+            if (account !== "copilot_refresh") {
+                backend.keyringLookup(account);
+            }
         }
         onKeyDeleted: (account) => {
+            if (account === "copilot_refresh") return;
             backend.apiKey = "";
             apiKeyPrompt.backendName = account;
             apiKeyPrompt.shown = true;
@@ -221,6 +231,14 @@ FloatingWindow {
         backend.keyringLookup("copilot_oauth");
     }
 
+    // Try refreshing the OAuth token using stored refresh token
+    property bool _refreshingToken: false
+    function refreshCopilotToken() {
+        console.log("ChatWindow: attempting OAuth token refresh...");
+        _refreshingToken = true;
+        backend.keyringLookup("copilot_refresh");
+    }
+
     // Exchange Copilot OAuth token for session token + API endpoint
     function exchangeCopilotToken(oauthToken) {
         copilotExchangeProcess.command = [
@@ -244,7 +262,7 @@ FloatingWindow {
         onExited: (exitCode, exitStatus) => {
             if (exitCode !== 0) {
                 console.warn("Copilot token exchange failed");
-                window.startGhLogin();
+                window.refreshCopilotToken();
                 return;
             }
 
@@ -268,10 +286,63 @@ FloatingWindow {
                     backend.fetchModels("copilot", token, "");
                 } else {
                     console.warn("Copilot token response missing endpoints or token");
-                    window.startGhLogin();
+                    window.refreshCopilotToken();
                 }
             } catch (e) {
                 console.warn("Copilot token parse error:", e);
+                window.refreshCopilotToken();
+            }
+        }
+    }
+
+    // Exchange refresh token for new OAuth + refresh tokens
+    function doCopilotRefresh(refreshToken) {
+        copilotRefreshProcess.command = [
+            "curl", "-s", "-X", "POST",
+            "https://github.com/login/oauth/access_token",
+            "-H", "Accept: application/json",
+            "-d", "client_id=Iv1.b507a08c87ecfe98"
+                + "&grant_type=refresh_token"
+                + "&refresh_token=" + refreshToken
+        ];
+        copilotRefreshProcess.running = true;
+    }
+
+    Process {
+        id: copilotRefreshProcess
+        running: false
+
+        stdout: StdioCollector {
+            id: refreshStdout
+            waitForEnd: true
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0) {
+                console.warn("ChatWindow: refresh token exchange failed");
+                window.startGhLogin();
+                return;
+            }
+
+            try {
+                let json = JSON.parse(refreshStdout.text);
+
+                if (json.access_token) {
+                    console.log("ChatWindow: OAuth token refreshed successfully");
+                    // Store new OAuth token
+                    backend.keyringStore("copilot_oauth", json.access_token);
+                    // Store new refresh token if provided
+                    if (json.refresh_token) {
+                        backend.keyringStore("copilot_refresh", json.refresh_token);
+                    }
+                    // Exchange for session token
+                    window.exchangeCopilotToken(json.access_token);
+                } else {
+                    console.warn("ChatWindow: refresh response had no access_token:", json.error || "");
+                    window.startGhLogin();
+                }
+            } catch (e) {
+                console.warn("ChatWindow: refresh parse error:", e);
                 window.startGhLogin();
             }
         }
@@ -544,6 +615,7 @@ FloatingWindow {
                             onClicked: {
                                 if (window.activeBackendName === "copilot") {
                                     backend.keyringDelete("copilot_oauth");
+                                    backend.keyringDelete("copilot_refresh");
                                     backend.apiKey = "";
                                     backend.extraHeaders = [];
                                     window.startGhLogin();
@@ -661,9 +733,13 @@ FloatingWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
 
-                onAuthCompleted: (oauthToken) => {
+                onAuthCompleted: (oauthToken, refreshToken) => {
                     // Store OAuth token in keyring for future use
                     backend.keyringStore("copilot_oauth", oauthToken);
+                    // Store refresh token if provided
+                    if (refreshToken && refreshToken.length > 0) {
+                        backend.keyringStore("copilot_refresh", refreshToken);
+                    }
                     // Exchange for session token
                     window.exchangeCopilotToken(oauthToken);
                 }

@@ -20,7 +20,7 @@ Item {
     property int pollInterval: 5000
 
     // The OAuth token (ghu_...) — NOT the session token
-    signal authCompleted(string oauthToken)
+    signal authCompleted(string oauthToken, string refreshToken)
     signal authFailed(string error)
     signal authCancelled()
 
@@ -139,12 +139,12 @@ Item {
                 let json = JSON.parse(pollStdout.text);
 
                 if (json.access_token) {
-                    // Success — got the OAuth token
+                    // Success — got the OAuth token (+ refresh token if available)
                     pollTimer.running = false;
                     root.inProgress = false;
                     root.statusText = "Authenticated!";
                     root.shown = false;
-                    root.authCompleted(json.access_token);
+                    root.authCompleted(json.access_token, json.refresh_token || "");
                 } else if (json.error === "authorization_pending") {
                     // User hasn't entered code yet — keep polling
                     root.statusText = "Waiting for authorization...";
