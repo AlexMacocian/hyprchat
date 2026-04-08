@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -373,6 +372,9 @@ public sealed class CopilotTokenResponse
   [JsonPropertyName("token")]
   public string Token { get; set; } = "";
 
+  [JsonPropertyName("expires_at")]
+  public long ExpiresAt { get; set; }
+
   [JsonPropertyName("endpoints")]
   public CopilotEndpoints? Endpoints { get; set; }
 }
@@ -381,6 +383,26 @@ public sealed class CopilotEndpoints
 {
   [JsonPropertyName("api")]
   public string Api { get; set; } = "";
+}
+
+// --- OAuth token refresh response ---
+
+public sealed class OAuthTokenResponse
+{
+  [JsonPropertyName("access_token")]
+  public string? AccessToken { get; set; }
+
+  [JsonPropertyName("refresh_token")]
+  public string? RefreshToken { get; set; }
+
+  [JsonPropertyName("token_type")]
+  public string? TokenType { get; set; }
+
+  [JsonPropertyName("error")]
+  public string? Error { get; set; }
+
+  [JsonPropertyName("error_description")]
+  public string? ErrorDescription { get; set; }
 }
 
 // --- Copilot/OpenAI models response ---
@@ -505,6 +527,7 @@ public sealed class OpenAiRequestBody
 [JsonSerializable(typeof(MemoryReadResult))]
 [JsonSerializable(typeof(OpenAiStreamChunk))]
 [JsonSerializable(typeof(CopilotTokenResponse))]
+[JsonSerializable(typeof(OAuthTokenResponse))]
 [JsonSerializable(typeof(ModelsApiResponse))]
 [JsonSerializable(typeof(ChatMessage))]
 [JsonSerializable(typeof(ToolCallMessage))]

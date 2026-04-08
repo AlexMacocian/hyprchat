@@ -22,9 +22,10 @@ var memory = new MemoryStore();
 var files = new FileService();
 var web = new WebService(http);
 using var shell = new ShellExecutor();
+var copilotTokens = new CopilotTokenManager(http, transport);
 var toolDispatcher = new ToolDispatcher(memory, files, web, shell);
-var chat = new ChatService(http, toolDispatcher, transport);
-var modelFetcher = new ModelFetcher(http, transport);
+var chat = new ChatService(http, toolDispatcher, transport, copilotTokens);
+var modelFetcher = new ModelFetcher(http, transport, copilotTokens);
 
 // Initialize services
 var initTasks = new List<Task>();
@@ -114,6 +115,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<ModelFetchParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             var result = await modelFetcher.FetchAsync(p, ct);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, result, HyprChatJsonContext.Default.RpcResponseModelListResult);
@@ -124,6 +126,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<KeyringParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             var (found, key) = await KeyringService.LookupAsync(p.Account);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, new KeyringResult
@@ -139,6 +142,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<KeyringParams>(req.Params);
             if (p is null || p.Key is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             await KeyringService.StoreAsync(p.Account, p.Key);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, "ok", HyprChatJsonContext.Default.RpcResponseString);
@@ -149,6 +153,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<KeyringParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             await KeyringService.DeleteAsync(p.Account);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, "ok", HyprChatJsonContext.Default.RpcResponseString);
@@ -169,6 +174,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<MemoryTopicParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             var content = memory.ReadTopic(p.Topic);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, new MemoryReadResult { Topic = p.Topic, Content = content },
@@ -180,6 +186,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<MemoryTopicParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             memory.EditTopic(p.Topic, p.Content ?? "");
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, "ok", HyprChatJsonContext.Default.RpcResponseString);
@@ -190,6 +197,7 @@ async Task HandleRequestAsync(RpcRequest req, CancellationToken ct)
         {
             var p = Deserialize<MemoryTopicParams>(req.Params);
             if (p is null) { transport.SendError(req.Id, -32602, "Invalid params"); return; }
+
             memory.DeleteTopic(p.Topic);
             if (req.Id.HasValue)
                 transport.SendResponse(req.Id, "ok", HyprChatJsonContext.Default.RpcResponseString);

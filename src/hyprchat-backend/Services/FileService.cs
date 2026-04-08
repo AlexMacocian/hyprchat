@@ -12,8 +12,8 @@ public sealed class FileService
 
     public async Task<string> ReadFileAsync(string path, CancellationToken ct = default)
     {
-        if (!IsAllowed(path))
-            return $"BLOCKED: Path '{path}' is outside the allowed root '{AllowedRoot}'.";
+        if (!this.IsAllowed(path))
+            return $"BLOCKED: Path '{path}' is outside the allowed root '{this.AllowedRoot}'.";
 
         try
         {
@@ -27,6 +27,7 @@ public sealed class FileService
                           $"\n\n[... truncated {content.Length - 50000} chars ...]\n\n" +
                           content[^25000..];
             }
+
             return content.Length > 0 ? content : "(empty file)";
         }
         catch (Exception ex)
@@ -37,8 +38,8 @@ public sealed class FileService
 
     public async Task<string> WriteFileAsync(string path, string content, CancellationToken ct = default)
     {
-        if (!IsAllowed(path))
-            return $"BLOCKED: Path '{path}' is outside the allowed root '{AllowedRoot}'.";
+        if (!this.IsAllowed(path))
+            return $"BLOCKED: Path '{path}' is outside the allowed root '{this.AllowedRoot}'.";
 
         try
         {
@@ -56,8 +57,8 @@ public sealed class FileService
 
     public async Task<string> ListDirectoryAsync(string path, CancellationToken ct = default)
     {
-        if (!IsAllowed(path))
-            return $"BLOCKED: Path '{path}' is outside the allowed root '{AllowedRoot}'.";
+        if (!this.IsAllowed(path))
+            return $"BLOCKED: Path '{path}' is outside the allowed root '{this.AllowedRoot}'.";
 
         try
         {
@@ -88,9 +89,9 @@ public sealed class FileService
 
     public async Task<string> SearchFilesAsync(string pattern, string searchRoot, CancellationToken ct = default)
     {
-        var root = string.IsNullOrEmpty(searchRoot) ? AllowedRoot : searchRoot;
-        if (!IsAllowed(root))
-            return $"BLOCKED: Path '{root}' is outside the allowed root '{AllowedRoot}'.";
+        var root = string.IsNullOrEmpty(searchRoot) ? this.AllowedRoot : searchRoot;
+        if (!this.IsAllowed(root))
+            return $"BLOCKED: Path '{root}' is outside the allowed root '{this.AllowedRoot}'.";
 
         try
         {
@@ -137,7 +138,7 @@ public sealed class FileService
         if (!path.StartsWith('/')) return false;
 
         var normalized = path.Replace("//", "/").TrimEnd('/');
-        var rootNorm = AllowedRoot.Replace("//", "/").TrimEnd('/');
+        var rootNorm = this.AllowedRoot.Replace("//", "/").TrimEnd('/');
         if (string.IsNullOrEmpty(rootNorm)) rootNorm = "/";
 
         return rootNorm == "/" || normalized.StartsWith(rootNorm, StringComparison.Ordinal);

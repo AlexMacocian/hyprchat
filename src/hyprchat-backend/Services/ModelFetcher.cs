@@ -7,10 +7,11 @@ namespace HyprChat.Services;
 /// Fetches available models from backend APIs.
 /// Handles Copilot token exchange, OpenAI, and Ollama model listing.
 /// </summary>
-public sealed class ModelFetcher
+public sealed class ModelFetcher(HttpClient http, RpcTransport transport, CopilotTokenManager copilotTokens)
 {
-    private readonly HttpClient _http;
-    private readonly RpcTransport _transport;
+    private readonly HttpClient http = http;
+    private readonly RpcTransport transport = transport;
+    private readonly CopilotTokenManager copilotTokens = copilotTokens;
 
     // Copilot headers matching VS Code / avante.nvim
     private static readonly (string Name, string Value)[] CopilotHeaders =
@@ -21,21 +22,15 @@ public sealed class ModelFetcher
         ("User-Agent", "GitHubCopilotChat/0.26.7"),
     ];
 
-    public ModelFetcher(HttpClient http, RpcTransport transport)
-    {
-        _http = http;
-        _transport = transport;
-    }
-
     public async Task<ModelListResult> FetchAsync(ModelFetchParams p, CancellationToken ct = default)
     {
         try
         {
             return p.Backend switch
             {
-                "copilot" => await FetchCopilotAsync(p.ApiKey, p.CopilotApiBase, ct),
-                "ollama" => await FetchOllamaAsync(p.ApiUrl, ct),
-                "openai" => await FetchOpenAiAsync(p.ApiKey, ct),
+                "copilot" => await this.FetchCopilotAsync(p.ApiKey, p.CopilotApiBase, ct),
+                "ollama" => await this.FetchOllamaAsync(p.ApiUrl, ct),
+                "openai" => await this.FetchOpenAiAsync(p.ApiKey, ct),
                 _ => new ModelListResult()
             };
         }
@@ -48,59 +43,32 @@ public sealed class ModelFetcher
 
     private async Task<ModelListResult> FetchCopilotAsync(string apiKeyOrOauth, string copilotApiBase, CancellationToken ct)
     {
-        string sessionToken;
-        string apiBase;
-
-        if (!string.IsNullOrEmpty(copilotApiBase))
+        // Use the token manager to get a valid session token
+        var (sessionToken, apiBase) = await this.copilotTokens.GetTokenAsync(ct);
+        if (sessionToken is null || apiBase is null)
         {
-            // Already have session token + API base — skip exchange
-            sessionToken = apiKeyOrOauth;
-            apiBase = copilotApiBase;
-        }
-        else
-        {
-            // Exchange OAuth token for session token
-            using var tokenReq = new HttpRequestMessage(HttpMethod.Get,
-                "https://api.github.com/copilot_internal/v2/token");
-            tokenReq.Headers.TryAddWithoutValidation("Authorization", $"token {apiKeyOrOauth}");
-            tokenReq.Headers.TryAddWithoutValidation("Accept", "application/json");
-
-            using var tokenResp = await _http.SendAsync(tokenReq, ct);
-            if (!tokenResp.IsSuccessStatusCode)
+            // Fallback: try direct exchange if token manager has no cached oauth token yet
+            // (e.g. fresh login where QML already exchanged and passed the session token)
+            if (!string.IsNullOrEmpty(copilotApiBase))
             {
-                var body = await tokenResp.Content.ReadAsStringAsync(ct);
-                if (body.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
-                    body.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
-                {
-                    _transport.SendSignal("models/tokenExpired");
-                }
+                sessionToken = apiKeyOrOauth;
+                apiBase = copilotApiBase;
+            }
+            else
+            {
+                this.transport.SendSignal("models/tokenExpired");
                 return new ModelListResult();
             }
-
-            var tokenJson = await tokenResp.Content.ReadAsStringAsync(ct);
-            var tokenData = JsonSerializer.Deserialize(tokenJson, HyprChatJsonContext.Default.CopilotTokenResponse);
-            if (tokenData is null || string.IsNullOrEmpty(tokenData.Token) ||
-                string.IsNullOrEmpty(tokenData.Endpoints?.Api))
-                return new ModelListResult();
-
-            apiBase = tokenData.Endpoints.Api;
-            sessionToken = tokenData.Token;
-
-            _transport.SendNotification("models/copilotApiReady", new CopilotApiResult
-            {
-                ApiBase = apiBase,
-                Token = sessionToken
-            }, HyprChatJsonContext.Default.RpcNotificationCopilotApiResult);
         }
 
-        // Step 2: Fetch models
+        // Fetch models
         using var modelsReq = new HttpRequestMessage(HttpMethod.Get, $"{apiBase}/models");
         modelsReq.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sessionToken}");
         modelsReq.Headers.TryAddWithoutValidation("Accept", "application/json");
         foreach (var (name, value) in CopilotHeaders)
             modelsReq.Headers.TryAddWithoutValidation(name, value);
 
-        using var modelsResp = await _http.SendAsync(modelsReq, ct);
+        using var modelsResp = await this.http.SendAsync(modelsReq, ct);
         var modelsJson = await modelsResp.Content.ReadAsStringAsync(ct);
         var modelsData = JsonSerializer.Deserialize(modelsJson, HyprChatJsonContext.Default.ModelsApiResponse);
 
@@ -140,7 +108,7 @@ public sealed class ModelFetcher
     private async Task<ModelListResult> FetchOllamaAsync(string apiUrl, CancellationToken ct)
     {
         var baseUrl = string.IsNullOrEmpty(apiUrl) ? "http://localhost:11434" : apiUrl;
-        var json = await _http.GetStringAsync($"{baseUrl}/api/tags", ct);
+        var json = await this.http.GetStringAsync($"{baseUrl}/api/tags", ct);
         var data = JsonSerializer.Deserialize(json, HyprChatJsonContext.Default.ModelsApiResponse);
 
         var result = new ModelListResult();
@@ -149,6 +117,7 @@ public sealed class ModelFetcher
             foreach (var m in data.Models)
                 result.Models.Add(new ModelInfo { Id = m.Name, Name = m.Name });
         }
+
         return result;
     }
 
@@ -157,7 +126,7 @@ public sealed class ModelFetcher
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models");
         req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
 
-        using var resp = await _http.SendAsync(req, ct);
+        using var resp = await this.http.SendAsync(req, ct);
         var json = await resp.Content.ReadAsStringAsync(ct);
         var data = JsonSerializer.Deserialize(json, HyprChatJsonContext.Default.ModelsApiResponse);
 
@@ -171,6 +140,7 @@ public sealed class ModelFetcher
             foreach (var m in chatModels)
                 result.Models.Add(new ModelInfo { Id = m.Id, Name = m.Id });
         }
+
         return result;
     }
 }

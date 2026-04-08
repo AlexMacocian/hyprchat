@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using HyprChat.Protocol;
+using HyprChat.Services;
 using HyprChat.Tools;
 
 namespace HyprChat.Chat;
@@ -11,32 +12,26 @@ namespace HyprChat.Chat;
 /// Handles SSE parsing and the tool-use loop internally.
 /// Emits notifications via RpcTransport for the QML frontend.
 /// </summary>
-public sealed class ChatService
+public sealed class ChatService(HttpClient http, ToolDispatcher tools, RpcTransport transport, CopilotTokenManager copilotTokens)
 {
-    private readonly HttpClient _http;
-    private readonly ToolDispatcher _tools;
-    private readonly RpcTransport _transport;
+    private readonly HttpClient http = http;
+    private readonly ToolDispatcher tools = tools;
+    private readonly RpcTransport transport = transport;
+    private readonly CopilotTokenManager copilotTokens = copilotTokens;
     private const int MaxToolLoops = 100;
 
-    private CancellationTokenSource? _activeCts;
-
-    public ChatService(HttpClient http, ToolDispatcher tools, RpcTransport transport)
-    {
-        _http = http;
-        _tools = tools;
-        _transport = transport;
-    }
+    private CancellationTokenSource? activeCts;
 
     public void Cancel()
     {
-        _activeCts?.Cancel();
+        this.activeCts?.Cancel();
     }
 
     public async Task SendAsync(ChatSendParams p, CancellationToken externalCt)
     {
-        _activeCts?.Cancel();
+        this.activeCts?.Cancel();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
-        _activeCts = cts;
+        this.activeCts = cts;
         var ct = cts.Token;
 
         try
@@ -69,7 +64,11 @@ public sealed class ChatService
             // Add user messages (skip system/placeholder)
             foreach (var msg in p.Messages)
             {
-                if (msg.Role == "system" || msg.Content == "...") continue;
+                if (msg.Role == "system" || msg.Content == "...")
+                {
+                    continue;
+                }
+                
                 messages.Add(msg);
             }
 
@@ -80,14 +79,14 @@ public sealed class ChatService
                 ct.ThrowIfCancellationRequested();
 
                 Console.Error.WriteLine($"ChatService: streaming completion, {messages.Count} messages, loop {loopCount}");
-                var (content, toolCalls, usage) = await StreamCompletionAsync(
-                    p.ApiUrl, p.ApiKey, p.Model, messages, toolDefs, p.ExtraHeaders, ct);
+                var (content, toolCalls, usage) = await this.StreamCompletionWithRetryAsync(
+                    p, messages, toolDefs, ct);
                 Console.Error.WriteLine($"ChatService: stream done, content={content.Length} chars, toolCalls={toolCalls.Count}");
 
                 // Report usage
                 if (usage is not null)
                 {
-                    _transport.SendNotification("chat/usage", new UsageParams
+                    this.transport.SendNotification("chat/usage", new UsageParams
                     {
                         PromptTokens = usage.PromptTokens,
                         CompletionTokens = usage.CompletionTokens,
@@ -98,7 +97,7 @@ public sealed class ChatService
                 // No tool calls — we're done
                 if (toolCalls.Count == 0)
                 {
-                    _transport.SendSignal("chat/finished");
+                    this.transport.SendSignal("chat/finished");
                     return;
                 }
 
@@ -106,10 +105,10 @@ public sealed class ChatService
                 loopCount++;
                 if (loopCount > MaxToolLoops)
                 {
-                    _transport.SendNotification("chat/token",
+                    this.transport.SendNotification("chat/token",
                         new TokenParams { Token = "\n\n*[Tool loop limit reached]*" },
                         HyprChatJsonContext.Default.RpcNotificationTokenParams);
-                    _transport.SendSignal("chat/finished");
+                    this.transport.SendSignal("chat/finished");
                     return;
                 }
 
@@ -121,7 +120,7 @@ public sealed class ChatService
 
                 if (validToolCalls.Count == 0)
                 {
-                    _transport.SendSignal("chat/finished");
+                    this.transport.SendSignal("chat/finished");
                     return;
                 }
 
@@ -147,16 +146,16 @@ public sealed class ChatService
                 {
 
                     // Notify UI about tool execution
-                    _transport.SendNotification("chat/toolCall", new ToolCallNotification
+                    this.transport.SendNotification("chat/toolCall", new ToolCallNotification
                     {
                         Name = tc.Name,
                         Args = tc.Arguments
                     }, HyprChatJsonContext.Default.RpcNotificationToolCallNotification);
 
-                    var result = await _tools.ExecuteAsync(tc.Name, tc.Arguments, ct);
+                    var result = await this.tools.ExecuteAsync(tc.Name, tc.Arguments, ct);
 
                     // Notify UI with result preview
-                    _transport.SendNotification("chat/toolResult", new ToolResultNotification
+                    this.transport.SendNotification("chat/toolResult", new ToolResultNotification
                     {
                         Name = tc.Name,
                         Preview = result.Length > 200 ? result[..200] + "..." : result
@@ -179,13 +178,48 @@ public sealed class ChatService
         }
         catch (Exception ex)
         {
-            _transport.SendNotification("chat/error", new ErrorParams { Error = ex.Message },
+            this.transport.SendNotification("chat/error", new ErrorParams { Error = ex.Message },
                 HyprChatJsonContext.Default.RpcNotificationErrorParams);
         }
         finally
         {
-            if (_activeCts == cts)
-                _activeCts = null;
+            if (this.activeCts == cts)
+            {
+                this.activeCts = null;
+            }
+        }
+    }
+
+    private async Task<(string Content, List<AccumulatedToolCall> ToolCalls, OpenAiUsage? Usage)>
+        StreamCompletionWithRetryAsync(
+            ChatSendParams p,
+            List<ChatMessage> messages, List<ToolDefinition> tools,
+            CancellationToken ct)
+    {
+        try
+        {
+            return await this.StreamCompletionAsync(
+                p.ApiUrl, p.ApiKey, p.Model, messages, tools, p.ExtraHeaders, ct);
+        }
+        catch (HttpRequestException ex) when (
+            p.Backend == "copilot" &&
+            ex.Message.Contains("401", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine("ChatService: got 401, attempting transparent token refresh...");
+
+            var (token, apiBase) = await this.copilotTokens.RefreshTokenAsync(ct);
+            if (token is null || apiBase is null)
+            {
+                throw; // refresh failed, propagate original error
+            }
+
+            // Update params for retry and notify QML
+            p.ApiKey = token;
+            p.ApiUrl = apiBase + "/chat/completions";
+
+            Console.Error.WriteLine("ChatService: retrying with refreshed token");
+            return await this.StreamCompletionAsync(
+                p.ApiUrl, p.ApiKey, p.Model, messages, tools, p.ExtraHeaders, ct);
         }
     }
 
@@ -226,18 +260,13 @@ public sealed class ChatService
         }
 
         Console.Error.WriteLine($"ChatService: sending HTTP request to {apiUrl}");
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await this.http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         Console.Error.WriteLine($"ChatService: got HTTP {(int)response.StatusCode}");
 
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
             Console.Error.WriteLine($"ChatService: error body: {errorBody[..Math.Min(errorBody.Length, 500)]}");
-            if (errorBody.Contains("expired", StringComparison.OrdinalIgnoreCase) ||
-                errorBody.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
-            {
-                _transport.SendSignal("chat/tokenExpired");
-            }
             throw new HttpRequestException($"HTTP {(int)response.StatusCode}: {errorBody}");
         }
 
@@ -251,17 +280,34 @@ public sealed class ChatService
         while (true)
         {
             var line = await reader.ReadLineAsync(ct);
-            if (line is null) break; // End of stream
-            if (string.IsNullOrWhiteSpace(line)) continue; // Empty SSE line separator
-            if (!line.StartsWith("data: ")) continue;
+            if (line is null)
+            {
+                break; // End of stream
+            }
+            
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue; // Empty SSE line separator
+            }
+
+            if (!line.StartsWith("data: "))
+            {
+                continue;
+            }
 
             var payload = line[6..].Trim();
-            if (payload == "[DONE]") break;
+            if (payload == "[DONE]")
+            {
+                break;
+            }
 
             try
             {
                 var chunk = JsonSerializer.Deserialize(payload, HyprChatJsonContext.Default.OpenAiStreamChunk);
-                if (chunk is null) continue;
+                if (chunk is null)
+                {
+                    continue;
+                }
 
                 var delta = chunk.Choices?.FirstOrDefault()?.Delta;
                 if (delta is not null)
@@ -270,7 +316,7 @@ public sealed class ChatService
                     if (delta.Content is not null)
                     {
                         accumulatedContent.Append(delta.Content);
-                        _transport.SendNotification("chat/token", new TokenParams { Token = delta.Content },
+                        this.transport.SendNotification("chat/token", new TokenParams { Token = delta.Content },
                             HyprChatJsonContext.Default.RpcNotificationTokenParams);
                     }
 
@@ -281,24 +327,35 @@ public sealed class ChatService
                         {
                             var idx = tc.Index;
                             while (toolCalls.Count <= idx)
+                            {
                                 toolCalls.Add(new AccumulatedToolCall());
+                            }
 
                             if (tc.Id is not null)
+                            {
                                 toolCalls[idx].Id = tc.Id;
+                            }
+
                             if (tc.Function?.Name is not null)
+                            {
                                 toolCalls[idx].Name = tc.Function.Name;
+                            }
+                                
                             if (tc.Function?.Arguments is not null)
+                            {
                                 toolCalls[idx].Arguments += tc.Function.Arguments;
+                            }
                         }
                     }
                 }
 
                 if (chunk.Usage is not null)
+                {
                     usage = chunk.Usage;
+                }
             }
             catch (JsonException)
             {
-                // Malformed chunk — skip
             }
         }
 

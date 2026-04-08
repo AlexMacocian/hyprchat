@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace HyprChat.Services;
@@ -11,55 +10,56 @@ namespace HyprChat.Services;
 /// </summary>
 public sealed partial class ShellExecutor : IDisposable
 {
-    private readonly string _shell;
-    private readonly string _workDir;
-    private readonly string _socketPath = "/tmp/hyprchat-kitty.sock";
-    private readonly string _signalFile = "/tmp/hyprchat-done";
-
-    private Process? _terminalProcess;
-    private Process? _watchProcess;
-    private readonly SemaphoreSlim _execLock = new(1, 1);
-    private TaskCompletionSource<bool>? _commandDone;
-    private int _spawnFailCount;
     private const int MaxSpawnRetries = 3;
+
+    private readonly string shell;
+    private readonly string workDir;
+    private readonly string socketPath = "/tmp/hyprchat-kitty.sock";
+    private readonly string signalFile = "/tmp/hyprchat-done";
+
+    private Process? terminalProcess;
+    private Process? watchProcess;
+    private readonly SemaphoreSlim execLock = new(1, 1);
+    private TaskCompletionSource<bool>? commandDone;
+    private int spawnFailCount;
 
     public ShellExecutor()
     {
-        _shell = Environment.GetEnvironmentVariable("SHELL") ?? "/bin/bash";
-        _workDir = Environment.GetEnvironmentVariable("HOME") ?? "/tmp";
+        this.shell = Environment.GetEnvironmentVariable("SHELL") ?? "/bin/bash";
+        this.workDir = Environment.GetEnvironmentVariable("HOME") ?? "/tmp";
     }
 
     public async Task InitializeAsync()
     {
         // Clean up signal file
-        File.Delete(_signalFile);
-        await File.WriteAllTextAsync(_signalFile, "");
+        File.Delete(this.signalFile);
+        await File.WriteAllTextAsync(this.signalFile, "");
 
-        StartWatcher();
+        this.StartWatcher();
     }
 
     public async Task<string> ExecAsync(string command, CancellationToken ct = default)
     {
-        await _execLock.WaitAsync(ct);
+        await this.execLock.WaitAsync(ct);
         try
         {
-            await EnsureTerminalAsync();
+            await this.EnsureTerminalAsync();
 
             // Snapshot buffer before
-            var before = await KittyGetTextAsync();
+            var before = await this.KittyGetTextAsync();
 
             // Create completion signal
-            _commandDone = new TaskCompletionSource<bool>();
+            this.commandDone = new TaskCompletionSource<bool>();
 
             // Send command
-            await KittySendTextAsync(command + "\n");
+            await this.KittySendTextAsync(command + "\n");
 
             // Wait for postcmd hook to fire (with timeout)
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
             try
             {
-                await _commandDone.Task.WaitAsync(timeoutCts.Token);
+                await this.commandDone.Task.WaitAsync(timeoutCts.Token);
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
             {
@@ -70,7 +70,7 @@ public sealed partial class ShellExecutor : IDisposable
             await Task.Delay(300, ct);
 
             // Snapshot buffer after
-            var after = await KittyGetTextAsync();
+            var after = await this.KittyGetTextAsync();
 
             // Diff
             var result = DiffBuffers(before, after);
@@ -90,23 +90,23 @@ public sealed partial class ShellExecutor : IDisposable
         }
         finally
         {
-            _commandDone = null;
-            _execLock.Release();
+            this.commandDone = null;
+            this.execLock.Release();
         }
     }
 
     public async Task<string> ExecBackgroundAsync(string command, CancellationToken ct = default)
     {
-        await _execLock.WaitAsync(ct);
+        await this.execLock.WaitAsync(ct);
         try
         {
-            await EnsureTerminalAsync();
-            await KittySendTextAsync(command + "\n");
+            await this.EnsureTerminalAsync();
+            await this.KittySendTextAsync(command + "\n");
             return "Command sent to terminal in background.";
         }
         finally
         {
-            _execLock.Release();
+            this.execLock.Release();
         }
     }
 
@@ -114,63 +114,65 @@ public sealed partial class ShellExecutor : IDisposable
 
     private async Task EnsureTerminalAsync()
     {
-        if (_terminalProcess is { HasExited: false }) return;
+        if (this.terminalProcess is { HasExited: false }) return;
 
-        if (_spawnFailCount >= MaxSpawnRetries)
+        if (this.spawnFailCount >= MaxSpawnRetries)
             throw new InvalidOperationException("Failed to spawn terminal.");
 
-        _spawnFailCount = 0;
+        this.spawnFailCount = 0;
 
         // Build shell init command with postcmd hook
         string initCmd;
-        if (_shell.Contains("fish"))
-            initCmd = $"function __hyprchat_postcmd --on-event fish_postexec; echo done > '{_signalFile}'; end";
-        else if (_shell.Contains("zsh"))
-            initCmd = $"precmd() {{ echo done > '{_signalFile}'; }}";
+        if (this.shell.Contains("fish"))
+            initCmd = $"function __hyprchat_postcmd --on-event fish_postexec; echo done > '{this.signalFile}'; end";
+        else if (this.shell.Contains("zsh"))
+            initCmd = $"precmd() {{ echo done > '{this.signalFile}'; }}";
         else
-            initCmd = "PROMPT_COMMAND='echo done > \"" + _signalFile + "\";'\"${PROMPT_COMMAND}\"";
-        var initFile = _signalFile + ".init";
+            initCmd = "PROMPT_COMMAND='echo done > \"" + this.signalFile + "\";'\"${PROMPT_COMMAND}\"";
+        var initFile = this.signalFile + ".init";
         await File.WriteAllTextAsync(initFile, initCmd + "\n");
 
         // Build shell command to source init
         string shellCmd;
-        if (_shell.Contains("fish"))
-            shellCmd = $"{_shell} -C 'source {initFile}'";
-        else if (_shell.Contains("zsh"))
-            shellCmd = $"{_shell} -c 'source {initFile}; exec {_shell}'";
+        if (this.shell.Contains("fish"))
+            shellCmd = $"{this.shell} -C 'source {initFile}'";
+        else if (this.shell.Contains("zsh"))
+            shellCmd = $"{this.shell} -c 'source {initFile}; exec {this.shell}'";
         else
-            shellCmd = $"{_shell} --rcfile <(cat ~/.bashrc {initFile} 2>/dev/null)";
+            shellCmd = $"{this.shell} --rcfile <(cat ~/.bashrc {initFile} 2>/dev/null)";
 
-        _terminalProcess = new Process();
-        _terminalProcess.StartInfo = new ProcessStartInfo
+        this.terminalProcess = new Process
         {
-            FileName = "setsid",
-            UseShellExecute = false,
-            CreateNoWindow = true
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "setsid",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
         };
-        _terminalProcess.StartInfo.ArgumentList.Add("kitty");
-        _terminalProcess.StartInfo.ArgumentList.Add("--class");
-        _terminalProcess.StartInfo.ArgumentList.Add("hyprchat-shell");
-        _terminalProcess.StartInfo.ArgumentList.Add("--title");
-        _terminalProcess.StartInfo.ArgumentList.Add("HyprChat Shell");
-        _terminalProcess.StartInfo.ArgumentList.Add("--listen-on");
-        _terminalProcess.StartInfo.ArgumentList.Add($"unix:{_socketPath}");
-        _terminalProcess.StartInfo.ArgumentList.Add("--override");
-        _terminalProcess.StartInfo.ArgumentList.Add("allow_remote_control=yes");
-        _terminalProcess.StartInfo.ArgumentList.Add("--directory");
-        _terminalProcess.StartInfo.ArgumentList.Add(_workDir);
-        _terminalProcess.StartInfo.ArgumentList.Add("-e");
-        _terminalProcess.StartInfo.ArgumentList.Add("bash");
-        _terminalProcess.StartInfo.ArgumentList.Add("-c");
-        _terminalProcess.StartInfo.ArgumentList.Add(shellCmd);
+        this.terminalProcess.StartInfo.ArgumentList.Add("kitty");
+        this.terminalProcess.StartInfo.ArgumentList.Add("--class");
+        this.terminalProcess.StartInfo.ArgumentList.Add("hyprchat-shell");
+        this.terminalProcess.StartInfo.ArgumentList.Add("--title");
+        this.terminalProcess.StartInfo.ArgumentList.Add("HyprChat Shell");
+        this.terminalProcess.StartInfo.ArgumentList.Add("--listen-on");
+        this.terminalProcess.StartInfo.ArgumentList.Add($"unix:{this.socketPath}");
+        this.terminalProcess.StartInfo.ArgumentList.Add("--override");
+        this.terminalProcess.StartInfo.ArgumentList.Add("allow_remote_control=yes");
+        this.terminalProcess.StartInfo.ArgumentList.Add("--directory");
+        this.terminalProcess.StartInfo.ArgumentList.Add(this.workDir);
+        this.terminalProcess.StartInfo.ArgumentList.Add("-e");
+        this.terminalProcess.StartInfo.ArgumentList.Add("bash");
+        this.terminalProcess.StartInfo.ArgumentList.Add("-c");
+        this.terminalProcess.StartInfo.ArgumentList.Add(shellCmd);
 
-        _terminalProcess.EnableRaisingEvents = true;
-        _terminalProcess.Exited += (_, _) =>
+        this.terminalProcess.EnableRaisingEvents = true;
+        this.terminalProcess.Exited += (_, _) =>
         {
-            _spawnFailCount++;
-            _commandDone?.TrySetResult(false);
+            this.spawnFailCount++;
+            this.commandDone?.TrySetResult(false);
         };
-        _terminalProcess.Start();
+        this.terminalProcess.Start();
 
         // Wait for kitty to be ready
         await Task.Delay(2000);
@@ -178,19 +180,21 @@ public sealed partial class ShellExecutor : IDisposable
 
     private void StartWatcher()
     {
-        _watchProcess?.Kill();
-        _watchProcess?.Dispose();
+        this.watchProcess?.Kill();
+        this.watchProcess?.Dispose();
 
-        _watchProcess = new Process();
-        _watchProcess.StartInfo = new ProcessStartInfo
+        this.watchProcess = new Process
         {
-            FileName = "bash",
-            Arguments = $"-c \"while inotifywait -q -e close_write '{_signalFile}' 2>/dev/null; do echo DONE; done\"",
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "bash",
+                Arguments = $"-c \"while inotifywait -q -e close_write '{this.signalFile}' 2>/dev/null; do echo DONE; done\"",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
         };
-        _watchProcess.Start();
+        this.watchProcess.Start();
 
         // Read watch output in background
         _ = Task.Run(async () =>
@@ -199,10 +203,10 @@ public sealed partial class ShellExecutor : IDisposable
             {
                 while (true)
                 {
-                    var line = await _watchProcess.StandardOutput.ReadLineAsync();
+                    var line = await this.watchProcess.StandardOutput.ReadLineAsync();
                     if (line is null) break;
                     if (line.Contains("DONE"))
-                        _commandDone?.TrySetResult(true);
+                        this.commandDone?.TrySetResult(true);
                 }
             }
             catch { /* watcher ended */ }
@@ -223,7 +227,7 @@ public sealed partial class ShellExecutor : IDisposable
         };
         proc.StartInfo.ArgumentList.Add("@");
         proc.StartInfo.ArgumentList.Add("--to");
-        proc.StartInfo.ArgumentList.Add($"unix:{_socketPath}");
+        proc.StartInfo.ArgumentList.Add($"unix:{this.socketPath}");
         proc.StartInfo.ArgumentList.Add("get-text");
         proc.StartInfo.ArgumentList.Add("--extent");
         proc.StartInfo.ArgumentList.Add("all");
@@ -245,7 +249,7 @@ public sealed partial class ShellExecutor : IDisposable
         };
         proc.StartInfo.ArgumentList.Add("@");
         proc.StartInfo.ArgumentList.Add("--to");
-        proc.StartInfo.ArgumentList.Add($"unix:{_socketPath}");
+        proc.StartInfo.ArgumentList.Add($"unix:{this.socketPath}");
         proc.StartInfo.ArgumentList.Add("send-text");
         proc.StartInfo.ArgumentList.Add("--");
         proc.StartInfo.ArgumentList.Add(text);
@@ -271,6 +275,7 @@ public sealed partial class ShellExecutor : IDisposable
             else
                 break;
         }
+
         return string.Join('\n', afterLines.Skip(startLine));
     }
 
@@ -282,15 +287,17 @@ public sealed partial class ShellExecutor : IDisposable
 
     public void Dispose()
     {
-        _watchProcess?.Kill();
-        _watchProcess?.Dispose();
-        _terminalProcess?.Kill();
-        _terminalProcess?.Dispose();
-        _execLock.Dispose();
+        this.watchProcess?.Kill();
+        this.watchProcess?.Dispose();
+        this.terminalProcess?.Kill();
+        this.terminalProcess?.Dispose();
+        this.execLock.Dispose();
 
         // Cleanup temp files
-        try { File.Delete(_socketPath); } catch { }
-        try { File.Delete(_signalFile); } catch { }
-        try { File.Delete(_signalFile + ".init"); } catch { }
+        try { File.Delete(this.socketPath); } catch { }
+
+        try { File.Delete(this.signalFile); } catch { }
+
+        try { File.Delete(this.signalFile + ".init"); } catch { }
     }
 }

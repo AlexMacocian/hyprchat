@@ -8,15 +8,10 @@ namespace HyprChat.Services;
 /// Web search via DuckDuckGo and page content extraction via SmartReader.
 /// Replaces WebSearchService.qml + scraper.js — no Node.js dependency.
 /// </summary>
-public sealed partial class WebService
+public sealed partial class WebService(HttpClient http)
 {
-    private readonly HttpClient _http;
+    private readonly HttpClient _http = http;
     private const int MaxPageLength = 8000;
-
-    public WebService(HttpClient http)
-    {
-        _http = http;
-    }
 
     public async Task<string> SearchAsync(string query, CancellationToken ct = default)
     {
@@ -29,7 +24,7 @@ public sealed partial class WebService
             request.Headers.UserAgent.ParseAdd(
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-            using var response = await _http.SendAsync(request, ct);
+            using var response = await this._http.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
                 return $"Search failed: HTTP {(int)response.StatusCode}";
 
@@ -61,8 +56,8 @@ public sealed partial class WebService
             var count = Math.Min(results.Count, 8);
             for (var i = 0; i < count; i++)
             {
-                var r = results[i];
-                output += $"{i + 1}. **{r.Title}**\n   {r.Url}\n\n";
+                var (Title, Url) = results[i];
+                output += $"{i + 1}. **{Title}**\n   {Url}\n\n";
             }
 
             return output;
@@ -93,7 +88,7 @@ public sealed partial class WebService
             }
 
             // Fallback: fetch raw HTML and strip tags
-            return await FetchFallbackAsync(url, ct);
+            return await this.FetchFallbackAsync(url, ct);
         }
         catch (TaskCanceledException)
         {
@@ -104,7 +99,7 @@ public sealed partial class WebService
             // SmartReader failed — try fallback
             try
             {
-                return await FetchFallbackAsync(url, ct);
+                return await this.FetchFallbackAsync(url, ct);
             }
             catch (Exception ex2)
             {
@@ -119,7 +114,7 @@ public sealed partial class WebService
         request.Headers.UserAgent.ParseAdd(
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-        using var response = await _http.SendAsync(request, ct);
+        using var response = await this._http.SendAsync(request, ct);
         var html = await response.Content.ReadAsStringAsync(ct);
 
         // Strip scripts, styles, and HTML tags
